@@ -253,8 +253,13 @@ def get_status_color(pred):
     elif pred < 4.5: return "Poor 🟠", "#F97316"
     else: return "Severe 🔴", "#EF4444"
 
+from datetime import datetime, timedelta
+date1 = (datetime.now() + timedelta(days=1)).strftime("%b %d")
+date2 = (datetime.now() + timedelta(days=2)).strftime("%b %d")
+date3 = (datetime.now() + timedelta(days=3)).strftime("%b %d")
+
 # Display Current AQI First
-st.markdown('<div class="metric-card" style="width: 300px; margin: 0 auto; margin-bottom: 20px;"><p>🕒 Current Hour AQI</p><p class="big-font">{}</p></div>'.format(int(latest['aqi'])), unsafe_allow_html=True)
+st.markdown('<div class="metric-card" style="width: 300px; margin: 0 auto; margin-bottom: 20px;"><p>📊 Current AQI</p><p class="big-font">{}</p></div>'.format(int(latest['aqi'])), unsafe_allow_html=True)
 
 # Metrics Display
 st.subheader("🔮 3-Day Forecast")
@@ -262,15 +267,15 @@ col1, col2, col3 = st.columns(3)
 
 status1, color1 = get_status_color(pred_day1)
 with col1:
-    st.markdown(f'<div class="metric-card" style="border: 2px solid #8B5CF6;"><p>Day 1 Forecast</p><p class="big-font">{pred_day1:.2f}</p><p style="color:{color1}; font-weight:bold;">{status1}</p></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-card" style="border: 2px solid #8B5CF6;"><p>📅 {date1}</p><p class="big-font">{pred_day1:.2f}</p><p style="color:{color1}; font-weight:bold;">{status1}</p></div>', unsafe_allow_html=True)
 
 status2, color2 = get_status_color(pred_day2)
 with col2:
-    st.markdown(f'<div class="metric-card"><p>Day 2 Forecast</p><p class="big-font">{pred_day2:.2f}</p><p style="color:{color2}; font-weight:bold;">{status2}</p></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-card"><p>📅 {date2}</p><p class="big-font">{pred_day2:.2f}</p><p style="color:{color2}; font-weight:bold;">{status2}</p></div>', unsafe_allow_html=True)
 
 status3, color3 = get_status_color(pred_day3)
 with col3:
-    st.markdown(f'<div class="metric-card"><p>Day 3 Forecast</p><p class="big-font">{pred_day3:.2f}</p><p style="color:{color3}; font-weight:bold;">{status3}</p></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-card"><p>📅 {date3}</p><p class="big-font">{pred_day3:.2f}</p><p style="color:{color3}; font-weight:bold;">{status3}</p></div>', unsafe_allow_html=True)
 
 st.markdown("<br><hr><br>", unsafe_allow_html=True)
 
