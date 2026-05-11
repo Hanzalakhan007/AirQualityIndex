@@ -1,6 +1,8 @@
 name: Daily Training Pipeline
 
 on:
+  push:
+    branches: [ main ]
   schedule:
     - cron: '0 0 * * *' # Runs every day at midnight UTC
   workflow_dispatch: # Allows manual triggering from the GitHub UI
