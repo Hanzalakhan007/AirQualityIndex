@@ -9,6 +9,20 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Define PyTorch NN Architecture (Global for accessibility)
+class AQIPredictorNN(nn.Module):
+    def __init__(self, input_dim):
+        super(AQIPredictorNN, self).__init__()
+        self.fc1 = nn.Linear(input_dim, 64)
+        self.relu = nn.ReLU()
+        self.fc2 = nn.Linear(64, 32)
+        self.fc3 = nn.Linear(32, 3)
+    def forward(self, x):
+        x = self.relu(self.fc1(x))
+        x = self.relu(self.fc2(x))
+        x = self.fc3(x)
+        return x
+
 # SETUP INITIAL CONFIG (Must be the first command)
 st.set_page_config(page_title="AQI Prediction System", page_icon="🌍", layout="wide")
 
@@ -44,19 +58,7 @@ st.markdown("""
 # ----------------------------------------------------
 @st.cache_resource
 def load_models():
-    # Define PyTorch NN Architecture inside or load it
-    class AQIPredictorNN(nn.Module):
-        def __init__(self, input_dim):
-            super(AQIPredictorNN, self).__init__()
-            self.fc1 = nn.Linear(input_dim, 64)
-            self.relu = nn.ReLU()
-            self.fc2 = nn.Linear(64, 32)
-            self.fc3 = nn.Linear(32, 3)
-        def forward(self, x):
-            x = self.relu(self.fc1(x))
-            x = self.relu(self.fc2(x))
-            x = self.fc3(x)
-            return x
+    xgb_model, rf_model, ridge_model, pytorch_model, scaler = None, None, None, None, None
             
     try:
         import hopsworks
@@ -65,73 +67,63 @@ def load_models():
         
         # 1. XGBoost
         try:
-            print("Downloading XGBoost model...")
             xgb_hw = mr.get_model(name="aqi_xgboost_model", version=2)
             xgb_dir = xgb_hw.download()
             xgb_model = joblib.load(os.path.join(xgb_dir, 'xgb_model.pkl'))
-        except Exception as e:
-            print(f"XGBoost load failed: {e}")
-            xgb_model = None
+        except: pass
         
         # 2. Random Forest
         try:
-            print("Downloading Random Forest model...")
             rf_hw = mr.get_model(name="aqi_rf_model", version=1)
             rf_dir = rf_hw.download()
             rf_model = joblib.load(os.path.join(rf_dir, 'rf_model.pkl'))
-        except Exception as e:
-            print(f"RF load failed: {e}")
-            rf_model = None
+        except: pass
 
         # 3. Ridge
         try:
-            print("Downloading Ridge model...")
             ridge_hw = mr.get_model(name="aqi_ridge_model", version=1)
             ridge_dir = ridge_hw.download()
             ridge_model = joblib.load(os.path.join(ridge_dir, 'ridge_model.pkl'))
-        except Exception as e:
-            print(f"Ridge load failed: {e}")
-            ridge_model = None
+        except: pass
 
         # 4. PyTorch
         try:
-            print("Downloading PyTorch model...")
             pytorch_hw = mr.get_model(name="aqi_pytorch_model", version=1)
             pytorch_dir = pytorch_hw.download()
             pytorch_model = AQIPredictorNN(16)
             pytorch_model.load_state_dict(torch.load(os.path.join(pytorch_dir, 'pytorch_model.pth')))
             pytorch_model.eval()
-        except Exception as e:
-            print(f"PyTorch load failed: {e}")
-            pytorch_model = None
+        except: pass
 
         # 5. Scaler
         try:
-            print("Downloading Scaler...")
             scaler_hw = mr.get_model(name="aqi_scaler", version=1)
             scaler_dir = scaler_hw.download()
             scaler = joblib.load(os.path.join(scaler_dir, 'scaler.pkl'))
-        except Exception as e:
-            print(f"Scaler load failed: {e}")
-            scaler = None
+        except: pass
         
     except Exception as e:
         print(f"Hopsworks connection error: {e}")
-        # Local fallback
-        xgb_model, rf_model, ridge_model, pytorch_model, scaler = None, None, None, None, None
 
-    # Final check: If everything is None, try local fallback
+    # INDIVIDUAL LOCAL FALLBACK (If any model is still None)
     if xgb_model is None:
+        try: xgb_model = joblib.load('models/xgb_model.pkl')
+        except: pass
+    if rf_model is None:
+        try: rf_model = joblib.load('models/rf_model.pkl')
+        except: pass
+    if ridge_model is None:
+        try: ridge_model = joblib.load('models/ridge_model.pkl')
+        except: pass
+    if scaler is None:
+        try: scaler = joblib.load('models/scaler.pkl')
+        except: pass
+    if pytorch_model is None:
         try:
-            xgb_model = joblib.load('models/xgb_model.pkl')
-            rf_model = joblib.load('models/rf_model.pkl')
-            ridge_model = joblib.load('models/ridge_model.pkl')
-            scaler = joblib.load('models/scaler.pkl')
             pytorch_model = AQIPredictorNN(16)
             pytorch_model.load_state_dict(torch.load('models/pytorch_model.pth'))
             pytorch_model.eval()
-        except:
-            pass
+        except: pass
             
     return xgb_model, rf_model, ridge_model, pytorch_model, scaler
 
