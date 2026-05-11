@@ -60,40 +60,64 @@ def load_models():
         mr = project.get_model_registry()
         
         # 1. XGBoost
-        print("Downloading XGBoost model...")
-        xgb_hw = mr.get_model("aqi_xgboost_model", version=2)
-        xgb_dir = xgb_hw.download()
-        xgb_model = joblib.load(os.path.join(xgb_dir, 'xgb_model.pkl'))
+        try:
+            print("Downloading XGBoost model...")
+            xgb_hw = mr.get_model(name="aqi_xgboost_model", version=2)
+            xgb_dir = xgb_hw.download()
+            xgb_model = joblib.load(os.path.join(xgb_dir, 'xgb_model.pkl'))
+        except Exception as e:
+            print(f"XGBoost load failed: {e}")
+            xgb_model = None
         
         # 2. Random Forest
-        print("Downloading Random Forest model...")
-        rf_hw = mr.get_model("aqi_rf_model", version=1)
-        rf_dir = rf_hw.download()
-        rf_model = joblib.load(os.path.join(rf_dir, 'rf_model.pkl'))
+        try:
+            print("Downloading Random Forest model...")
+            rf_hw = mr.get_model(name="aqi_rf_model", version=1)
+            rf_dir = rf_hw.download()
+            rf_model = joblib.load(os.path.join(rf_dir, 'rf_model.pkl'))
+        except Exception as e:
+            print(f"RF load failed: {e}")
+            rf_model = None
 
         # 3. Ridge
-        print("Downloading Ridge model...")
-        ridge_hw = mr.get_model("aqi_ridge_model", version=1)
-        ridge_dir = ridge_hw.download()
-        ridge_model = joblib.load(os.path.join(ridge_dir, 'ridge_model.pkl'))
+        try:
+            print("Downloading Ridge model...")
+            ridge_hw = mr.get_model(name="aqi_ridge_model", version=1)
+            ridge_dir = ridge_hw.download()
+            ridge_model = joblib.load(os.path.join(ridge_dir, 'ridge_model.pkl'))
+        except Exception as e:
+            print(f"Ridge load failed: {e}")
+            ridge_model = None
 
         # 4. PyTorch
-        print("Downloading PyTorch model...")
-        pytorch_hw = mr.get_model("aqi_pytorch_model", version=1)
-        pytorch_dir = pytorch_hw.download()
-        pytorch_model = AQIPredictorNN(16)
-        pytorch_model.load_state_dict(torch.load(os.path.join(pytorch_dir, 'pytorch_model.pth')))
-        pytorch_model.eval()
+        try:
+            print("Downloading PyTorch model...")
+            pytorch_hw = mr.get_model(name="aqi_pytorch_model", version=1)
+            pytorch_dir = pytorch_hw.download()
+            pytorch_model = AQIPredictorNN(16)
+            pytorch_model.load_state_dict(torch.load(os.path.join(pytorch_dir, 'pytorch_model.pth')))
+            pytorch_model.eval()
+        except Exception as e:
+            print(f"PyTorch load failed: {e}")
+            pytorch_model = None
 
         # 5. Scaler
-        print("Downloading Scaler...")
-        scaler_hw = mr.get_model("aqi_scaler", version=1)
-        scaler_dir = scaler_hw.download()
-        scaler = joblib.load(os.path.join(scaler_dir, 'scaler.pkl'))
+        try:
+            print("Downloading Scaler...")
+            scaler_hw = mr.get_model(name="aqi_scaler", version=1)
+            scaler_dir = scaler_hw.download()
+            scaler = joblib.load(os.path.join(scaler_dir, 'scaler.pkl'))
+        except Exception as e:
+            print(f"Scaler load failed: {e}")
+            scaler = None
         
     except Exception as e:
-        print(f"Hopsworks Model Registry error: {e}. Falling back to local models.")
-        # Local fallback logic (for local development)
+        print(f"Hopsworks connection error: {e}")
+        # Local fallback
+        xgb_model, rf_model, ridge_model, pytorch_model, scaler = None, None, None, None, None
+
+    # Final check: If everything is None, try local fallback
+    if xgb_model is None:
         try:
             xgb_model = joblib.load('models/xgb_model.pkl')
             rf_model = joblib.load('models/rf_model.pkl')
@@ -103,13 +127,20 @@ def load_models():
             pytorch_model.load_state_dict(torch.load('models/pytorch_model.pth'))
             pytorch_model.eval()
         except:
-            st.error("Could not load models from Hopsworks or locally. Please check logs.")
-            return None, None, None, None, None
+            pass
+            
+    return xgb_model, rf_model, ridge_model, pytorch_model, scaler
         pytorch_model.eval()
         
     return xgb_model, rf_model, ridge_model, pytorch_model, scaler
 
 xgb_model, rf_model, ridge_model, pytorch_model, scaler = load_models()
+
+# If models are still missing (first time setup), show a message
+if scaler is None or xgb_model is None:
+    st.warning("🔄 System is still initializing! Models are currently being uploaded from the GitHub Pipeline to the Cloud. Please wait 2-3 minutes and refresh.")
+    st.info("💡 You can check the progress in your GitHub Actions 'Daily Training Pipeline'. Once it's green, the dashboard will go live.")
+    st.stop()
 
 # ----------------------------------------------------
 # 2. LOAD HISTORICAL DATA
