@@ -199,8 +199,31 @@ try:
         description="PyTorch NN predicting Next 3 Days AQI"
     )
     pytorch_hw_model.save('models/pytorch_model.pth')
+
+    print("Uploading Random Forest model...")
+    rf_hw_model = mr.python.create_model(
+        name="aqi_rf_model",
+        metrics={"r2_avg": results['Random Forest']},
+        description="Random Forest model predicting Next 3 Days AQI"
+    )
+    rf_hw_model.save('models/rf_model.pkl')
+
+    print("Uploading Ridge model...")
+    ridge_hw_model = mr.python.create_model(
+        name="aqi_ridge_model",
+        metrics={"r2_avg": results['Ridge']},
+        description="Ridge Regression model predicting Next 3 Days AQI"
+    )
+    ridge_hw_model.save('models/ridge_model.pkl')
+
+    print("Uploading Scaler...")
+    scaler_hw_model = mr.python.create_model(
+        name="aqi_scaler",
+        description="StandardScaler for AQI features"
+    )
+    scaler_hw_model.save('models/scaler.pkl')
     
-    print("Successfully uploaded models to Hopsworks Registry!")
+    print("Successfully uploaded all models and scaler to Hopsworks Registry!")
 except Exception as e:
     print(f"Failed to upload models to Hopsworks: {e}")
 
