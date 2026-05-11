@@ -219,15 +219,28 @@ input_scaled = scaler.transform(input_features)
 
 # Make Prediction
 if model_choice == "XGBoost (Recommended)":
+    if xgb_model is None:
+        st.error("XGBoost model is still loading. Please wait or try another model.")
+        st.stop()
     pred_aqi = xgb_model.predict(input_scaled)[0]
 elif model_choice == "Random Forest":
+    if rf_model is None:
+        st.error("Random Forest model is still loading. Please wait or try another model.")
+        st.stop()
     pred_aqi = rf_model.predict(input_scaled)[0]
 elif model_choice == "Ridge Regression":
+    if ridge_model is None:
+        st.error("Ridge model is still loading. Please wait or try another model.")
+        st.stop()
     pred_aqi = ridge_model.predict(input_scaled)[0]
 else: # PyTorch
+    if pytorch_model is None:
+        st.error("PyTorch model is still loading or not available. Please wait or try another model.")
+        st.stop()
     input_tensor = torch.tensor(input_scaled, dtype=torch.float32)
     with torch.no_grad():
-        pred_aqi = pytorch_model(input_tensor).numpy()[0]
+        # Ensure it's on CPU and detached before converting to numpy
+        pred_aqi = pytorch_model(input_tensor).cpu().detach().numpy()[0]
 
 # Prevent negative predictions just in case
 pred_day1 = max(1.0, pred_aqi[0])
