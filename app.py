@@ -130,9 +130,6 @@ def load_models():
             pass
             
     return xgb_model, rf_model, ridge_model, pytorch_model, scaler
-        pytorch_model.eval()
-        
-    return xgb_model, rf_model, ridge_model, pytorch_model, scaler
 
 xgb_model, rf_model, ridge_model, pytorch_model, scaler = load_models()
 
