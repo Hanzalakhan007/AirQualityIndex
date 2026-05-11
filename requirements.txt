@@ -14,4 +14,5 @@ joblib
 
 torch
 
-hopsworks
+hopsworks[python]==4.7.*
+pyarrow
