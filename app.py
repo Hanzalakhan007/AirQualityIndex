@@ -173,9 +173,9 @@ nh3 = st.sidebar.slider("Ammonia (NH3)", 0.0, 100.0, float(latest['nh3']))
 
 st.sidebar.markdown("---")
 model_choice = st.sidebar.selectbox("Choose AI Model", [
-    "XGBoost (Recommended)", 
+    "Ridge Regression (Recommended)", 
     "Random Forest", 
-    "Ridge Regression", 
+    "XGBoost", 
     "PyTorch Deep Learning"
 ])
 
@@ -214,21 +214,21 @@ input_features = input_features[features_order]
 input_scaled = scaler.transform(input_features)
 
 # Make Prediction
-if model_choice == "XGBoost (Recommended)":
-    if xgb_model is None:
-        st.error("XGBoost model is still loading. Please wait or try another model.")
+if model_choice == "Ridge Regression (Recommended)":
+    if ridge_model is None:
+        st.error("Ridge model is still loading. Please wait or try another model.")
         st.stop()
-    pred_aqi = xgb_model.predict(input_scaled)[0]
+    pred_aqi = ridge_model.predict(input_scaled)[0]
 elif model_choice == "Random Forest":
     if rf_model is None:
         st.error("Random Forest model is still loading. Please wait or try another model.")
         st.stop()
     pred_aqi = rf_model.predict(input_scaled)[0]
-elif model_choice == "Ridge Regression":
-    if ridge_model is None:
-        st.error("Ridge model is still loading. Please wait or try another model.")
+elif model_choice == "XGBoost":
+    if xgb_model is None:
+        st.error("XGBoost model is still loading. Please wait or try another model.")
         st.stop()
-    pred_aqi = ridge_model.predict(input_scaled)[0]
+    pred_aqi = xgb_model.predict(input_scaled)[0]
 else: # PyTorch
     if pytorch_model is None:
         st.error("PyTorch model is still loading or not available. Please wait or try another model.")
@@ -288,7 +288,7 @@ st.line_chart(chart_data, use_container_width=True)
 st.markdown("<hr><br>", unsafe_allow_html=True)
 
 st.subheader("🧠 Model Explainability (SHAP)")
-st.write("We don't do Black-Box AI! Here is exactly how the XGBoost model makes its decisions:")
+st.write("We don't do Black-Box AI! Here is exactly how the Ridge Regression model makes its decisions:")
 
 col_img1, col_img2 = st.columns(2)
 with col_img1:
