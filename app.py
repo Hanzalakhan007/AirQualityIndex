@@ -16,20 +16,24 @@ st.set_page_config(page_title="AQI Prediction System", page_icon="🌍", layout=
 st.markdown("""
 <style>
     .big-font {
-        font-size:40px !important;
+        font-size: 40px !important;
         font-weight: 800;
-        color: #1F2937;
+        color: #1F2937 !important;
     }
     .metric-card {
         background-color: #ffffff;
+        color: #1F2937 !important;
         border-radius: 12px;
         padding: 24px;
         text-align: center;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
         border: 1px solid #E5E7EB;
     }
+    .metric-card p {
+        color: #4B5563 !important; /* Slightly lighter gray for subtext */
+        font-weight: 500;
+    }
     h1, h2, h3 {
-        color: #111827;
         font-family: 'Inter', sans-serif;
     }
 </style>
