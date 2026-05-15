@@ -3,7 +3,6 @@ import joblib
 import shap
 import lime
 import lime.lime_tabular
-import numpy as np
 import os
 import matplotlib.pyplot as plt
 
@@ -79,7 +78,7 @@ exp = explainer_lime.explain_instance(
 
 # Save LIME plot
 fig = exp.as_pyplot_figure()
-plt.title(f"LIME: Why did the model predict this Day 1 AQI?")
+plt.title("LIME: Why did the model predict this Day 1 AQI?")
 fig.savefig('reports/explainability/lime_single_prediction.png', bbox_inches='tight')
 plt.close()
 
