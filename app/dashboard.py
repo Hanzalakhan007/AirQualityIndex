@@ -154,6 +154,40 @@ def render_forecast_chart(predictions: list[float]) -> None:
     st.plotly_chart(figure, use_container_width=True)
 
 
+def render_model_comparison_chart(model_forecasts: dict[str, list[float]]) -> None:
+    if not model_forecasts:
+        st.info("Model comparison is unavailable until model forecasts are loaded.")
+        return
+
+    palette = ["#7dd3fc", "#5dade2", "#45b39d", "#f5b041", "#ec7063"]
+    figure = go.Figure()
+    for index, (model_name, predictions) in enumerate(model_forecasts.items()):
+        curve = build_forecast_curve(predictions)
+        if curve.empty:
+            continue
+        figure.add_trace(
+            go.Scatter(
+                x=curve["timestamp"],
+                y=curve["aqi_predicted"],
+                mode="lines",
+                name=model_name,
+                line={"width": 3 if index == 0 else 2, "color": palette[index % len(palette)], "dash": "solid" if index == 0 else "dot"},
+            )
+        )
+
+    figure.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(17, 29, 44, 0.55)",
+        font={"color": "#e6edf3"},
+        height=390,
+        margin={"l": 20, "r": 20, "t": 20, "b": 20},
+        xaxis_title="Time",
+        yaxis_title="AQI",
+        legend_title_text="Model",
+    )
+    st.plotly_chart(figure, use_container_width=True)
+
+
 def render_history_tab(history_df: pd.DataFrame) -> None:
     aqi_column = "aqi_display" if "aqi_display" in history_df.columns else "us_aqi"
     date_column = "date" if "date" in history_df.columns else history_df.columns[0]
@@ -277,6 +311,103 @@ def render_explainability() -> None:
             st.info("Run `python src/models/explain_model.py` to generate the SHAP impact plot.")
 
 
+def render_data_insights_tab(
+    history_df: pd.DataFrame,
+    leaderboard: list[dict[str, object]],
+    current_aqi: float | None,
+    predictions: list[float],
+    model_forecasts: dict[str, list[float]],
+) -> None:
+    left, right = st.columns(2)
+    history_column = "aqi_display" if "aqi_display" in history_df.columns else "us_aqi"
+    history_values = pd.to_numeric(history_df.get(history_column, pd.Series(dtype=float)), errors="coerce").dropna()
+    forecast_values = pd.Series(predictions, dtype=float).dropna()
+
+    with left:
+        st.markdown("### Historical Overview")
+        if history_values.empty:
+            st.info("Historical AQI data is not available yet.")
+        else:
+            trend = "Worsening" if current_aqi is not None and history_values.iloc[-1] > history_values.mean() else "Stable / Improving"
+            st.markdown(
+                f"""
+                <div class="insight-box">
+                    <div><b>Average AQI:</b> {history_values.mean():.1f}</div>
+                    <div><b>Peak AQI:</b> {history_values.max():.1f}</div>
+                    <div><b>Latest vs Average:</b> {trend}</div>
+                    <div><b>Observed Days:</b> {len(history_values)}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    with right:
+        st.markdown("### Forecast Analysis")
+        if forecast_values.empty:
+            st.info("Forecast data is not available yet.")
+        else:
+            outlook = aqi_level_and_color(float(forecast_values.mean()))[0]
+            st.markdown(
+                f"""
+                <div class="insight-box">
+                    <div><b>3-Day Average:</b> {forecast_values.mean():.1f}</div>
+                    <div><b>Projected Peak:</b> {forecast_values.max():.1f}</div>
+                    <div><b>Projected Minimum:</b> {forecast_values.min():.1f}</div>
+                    <div><b>Forecast Outlook:</b> {outlook}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    st.markdown("### Model Performance Benchmarks")
+    if leaderboard:
+        benchmark_df = pd.DataFrame(
+            [
+                {
+                    "Model": row["model"],
+                    "RMSE": round(float(row["rmse"]), 2),
+                    "MAE": round(float(row["mae"]), 2),
+                    "R2": round(float(row["r2"]), 3),
+                    "Status": "Active" if index == 0 else "Candidate",
+                }
+                for index, row in enumerate(leaderboard)
+            ]
+        )
+        st.dataframe(benchmark_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("Benchmark metrics are not available yet.")
+
+    st.markdown("### Forecast Comparison")
+    render_model_comparison_chart(model_forecasts)
+
+
+def render_health_guidance_tab(predictions: list[float], current_aqi: float | None) -> None:
+    current_level, _ = aqi_level_and_color(current_aqi)
+    alerts = alert_days(predictions)
+    st.markdown("### AQI Health Guide")
+    st.markdown(
+        """
+        - `0-50`: Air quality is satisfactory and outdoor activity is generally safe.
+        - `51-100`: Sensitive groups should reduce prolonged outdoor exertion.
+        - `101-150`: Children, seniors, and sensitive groups should limit time outdoors.
+        - `151-200`: Outdoor exposure should be reduced and a mask is recommended.
+        - `201+`: Avoid prolonged outdoor activity and stay indoors when possible.
+        """
+    )
+    st.markdown(
+        f"""
+        <div class="insight-box">
+            <div class="metric-title">Current Status</div>
+            <div style="font-size: 1.35rem; font-weight: 700; color: #ffffff;">{current_level}</div>
+            <div class="muted-note" style="margin-top: 0.5rem;">
+                {'No unhealthy days are forecast right now.' if not alerts else f'{len(alerts)} forecast day(s) currently exceed the unhealthy threshold.'}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def main() -> None:
     st.set_page_config(page_title="AQI Predictor", page_icon="🌫️", layout="wide")
     inject_styles()
@@ -290,6 +421,9 @@ def main() -> None:
     with st.sidebar:
         st.header("Forecast Controls")
         model_name = st.selectbox("Model Strategy", MODEL_OPTIONS, index=0)
+        if st.button("Generate Forecast", use_container_width=True):
+            clear_caches()
+            st.rerun()
         if st.button("Reload cached data", use_container_width=True):
             clear_caches()
             st.rerun()
@@ -315,6 +449,22 @@ def main() -> None:
                 value=float(current_value),
             )
 
+        st.markdown("---")
+        st.markdown("### About")
+        st.write("Real-time air quality monitoring and 3-day AQI forecasting for Karachi with automated Hopsworks-backed model delivery.")
+        st.markdown("---")
+        st.markdown("### System Status")
+        st.info("Active")
+        st.markdown("---")
+        st.markdown("### Technical Specs")
+        st.caption("Forecast horizon: next 3 days")
+        st.caption("Models: Ridge, Random Forest, XGBoost, PyTorch")
+        st.caption(f"Timezone: {TIMEZONE}")
+        st.markdown("---")
+        st.markdown("### Data Sources")
+        st.caption("Primary history: OpenWeather Air Pollution API")
+        st.caption("Live fallback snapshot: Open-Meteo Air Quality API")
+
     selected_model = None if model_name == "Best Available" else model_name
     forecast = predict_next_days(selected_model, overrides)
     predictions = forecast["predictions"]
@@ -324,6 +474,14 @@ def main() -> None:
     leaderboard = forecast["leaderboard"] or get_model_leaderboard()
     best_model = forecast["model_name"] or get_default_model_name()
     history_df = get_recent_daily_history()
+    available_model_names = [str(row["model"]) for row in leaderboard][:4] if leaderboard else []
+    model_forecasts: dict[str, list[float]] = {}
+    for candidate_model in available_model_names:
+        try:
+            candidate_forecast = predict_next_days(candidate_model, overrides)
+            model_forecasts[candidate_model] = candidate_forecast["predictions"]
+        except Exception:
+            continue
 
     st.title("Air Quality Forecast")
     st.markdown(f"**{DEFAULT_CITY}** · Real AQI scale (0-500) · Hopsworks-backed automation · Timezone: `{TIMEZONE}`")
@@ -384,11 +542,12 @@ def main() -> None:
         )
 
     st.markdown("---")
-    tab_report, tab_history, tab_insights, tab_explain = st.tabs(
-        ["Detailed Report", "Historical Overview", "Model Insights", "Explainability"]
+    tab_report, tab_history, tab_data, tab_health, tab_explain = st.tabs(
+        ["Detailed Report", "Historical Overview", "Data Insights", "Health Guidance", "Explainability"]
     )
 
     with tab_report:
+        curve_df = build_forecast_curve(predictions)
         report_df = pd.DataFrame(
             {
                 "Day": ["Tomorrow", "Day After", "Next Day"],
@@ -405,14 +564,26 @@ def main() -> None:
             "aqi_forecast_report.csv",
             "text/csv",
         )
+        if not curve_df.empty:
+            hourly_export = curve_df.rename(columns={"timestamp": "Forecast Time", "aqi_predicted": "Predicted AQI", "day_label": "Forecast Day"})
+            st.download_button(
+                "Download 72-hour curve CSV",
+                hourly_export.to_csv(index=False).encode("utf-8"),
+                "aqi_forecast_curve.csv",
+                "text/csv",
+            )
 
     with tab_history:
         render_history_tab(history_df)
 
-    with tab_insights:
-        render_insights_tab(leaderboard, predictions, current_aqi)
+    with tab_data:
+        render_data_insights_tab(history_df, leaderboard, current_aqi, predictions, model_forecasts)
+
+    with tab_health:
+        render_health_guidance_tab(predictions, current_aqi)
 
     with tab_explain:
+        render_insights_tab(leaderboard, predictions, current_aqi)
         render_explainability()
 
     st.markdown("---")
