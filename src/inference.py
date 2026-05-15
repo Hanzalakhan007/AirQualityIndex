@@ -303,31 +303,53 @@ def get_model_leaderboard() -> list[dict[str, Any]]:
     """Return model metrics sorted by best RMSE / R2."""
     _, _, metadata = load_models()
     leaderboard = []
+    metrics_path = Path("reports/model_metrics.csv")
+    csv_metrics: dict[str, dict[str, float]] = {}
+
+    if metrics_path.exists():
+        try:
+            fallback = pd.read_csv(metrics_path)
+            for _, row in fallback.iterrows():
+                model_name = str(row.get("Model"))
+                csv_metrics[model_name] = {
+                    "rmse": float(row.get("RMSE", 999999.0)),
+                    "mae": float(row.get("MAE", 999999.0)),
+                    "r2": float(row.get("R2_Score", -999999.0)),
+                }
+        except Exception:
+            csv_metrics = {}
+
     for label, info in metadata.items():
         metrics = info.get("metrics", {}) or {}
+        fallback_metrics = csv_metrics.get(label, {})
+        rmse = _model_metrics_value(metrics, "rmse", fallback_metrics.get("rmse", 999999.0))
+        mae = _model_metrics_value(metrics, "mae", fallback_metrics.get("mae", 999999.0))
+        r2 = _model_metrics_value(
+            metrics,
+            "r2",
+            _model_metrics_value(metrics, "r2_avg", fallback_metrics.get("r2", -999999.0)),
+        )
         leaderboard.append(
             {
                 "model": label,
-                "rmse": _model_metrics_value(metrics, "rmse", 999999.0),
-                "mae": _model_metrics_value(metrics, "mae", 999999.0),
-                "r2": _model_metrics_value(metrics, "r2", _model_metrics_value(metrics, "r2_avg", -999999.0)),
+                "rmse": rmse,
+                "mae": mae,
+                "r2": r2,
                 "version": info.get("version"),
             }
         )
+
     if not leaderboard:
-        metrics_path = Path("reports/model_metrics.csv")
-        if metrics_path.exists():
-            fallback = pd.read_csv(metrics_path)
-            for _, row in fallback.iterrows():
-                leaderboard.append(
-                    {
-                        "model": row.get("Model"),
-                        "rmse": float(row.get("RMSE", 999999.0)),
-                        "mae": float(row.get("MAE", 999999.0)),
-                        "r2": float(row.get("R2_Score", -999999.0)),
-                        "version": None,
-                    }
-                )
+        for model_name, metric_values in csv_metrics.items():
+            leaderboard.append(
+                {
+                    "model": model_name,
+                    "rmse": metric_values["rmse"],
+                    "mae": metric_values["mae"],
+                    "r2": metric_values["r2"],
+                    "version": None,
+                }
+            )
     return sorted(leaderboard, key=lambda item: (item["rmse"], -item["r2"]))
 
 

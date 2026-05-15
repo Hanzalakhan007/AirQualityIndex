@@ -371,11 +371,12 @@ def main() -> None:
         )
     with right:
         rmse = leaderboard[0]["rmse"] if leaderboard else None
+        rmse_text = f"Best RMSE {rmse:.2f}" if rmse is not None and rmse < 999999 else "Metrics unavailable"
         st.markdown(
             f"""
             <div class="insight-box">
                 <div class="metric-title">Performance Signal</div>
-                <div style="font-size: 1.35rem; font-weight: 700; color: #ffffff;">{f"Best RMSE {rmse:.2f}" if rmse is not None else "Metrics unavailable"}</div>
+                <div style="font-size: 1.35rem; font-weight: 700; color: #ffffff;">{rmse_text}</div>
                 <div class="muted-note" style="margin-top: 0.5rem;">Model comparison is kept close to the reference project, but still uses your Hopsworks-driven deployment flow.</div>
             </div>
             """,
