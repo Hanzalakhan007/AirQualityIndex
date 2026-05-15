@@ -1,0 +1,16 @@
+name: Deployment Template
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deployment notes
+        run: |
+          echo "Connect this repository to Streamlit Cloud and point the app to app.py."
+          echo "If you want API hosting too, deploy app/api.py with your preferred Python host."

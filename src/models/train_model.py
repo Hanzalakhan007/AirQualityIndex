@@ -1,230 +1,265 @@
-import pandas as pd
-import numpy as np
 import os
+import sys
+from pathlib import Path
+
 import joblib
-import hopsworks
+import numpy as np
+import pandas as pd
 from dotenv import load_dotenv
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-
-load_dotenv()
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-
-# ML Models
-from sklearn.linear_model import Ridge
 from sklearn.ensemble import RandomForestRegressor
-import xgboost as xgb
-
-# PyTorch (Deep Learning)
+from sklearn.linear_model import Ridge
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.multioutput import MultiOutputRegressor
+from sklearn.preprocessing import StandardScaler
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import xgboost as xgb
 
-os.makedirs('models', exist_ok=True)
-os.makedirs('reports', exist_ok=True)
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from config.settings import FEATURE_GROUP_NAME, FEATURE_GROUP_VERSION
+
+load_dotenv()
+
+os.makedirs("models", exist_ok=True)
+os.makedirs("reports", exist_ok=True)
 
 print("Starting Machine Learning Pipeline...")
 
-# 1. Load Processed Data
-print("Connecting to Hopsworks Feature Store...")
-try:
-    project = hopsworks.login()
-    fs = project.get_feature_store()
-    print("Fetching features from Feature Group 'aqi_features'...")
-    fg = fs.get_feature_group('aqi_features', version=1)
-    df = fg.read()
-    # Sort chronologically as Hopsworks doesn't guarantee order
-    df = df.sort_values('timestamp').reset_index(drop=True)
-except Exception as e:
-    print(f"Could not read from Hopsworks Feature Store: {e}")
-    print("Falling back to local CSV...")
-    df = pd.read_csv('data/processed/features.csv')
+FEATURE_COLUMNS = [
+    "us_aqi",
+    "co",
+    "no",
+    "no2",
+    "o3",
+    "so2",
+    "pm2_5",
+    "pm10",
+    "nh3",
+    "hour",
+    "day_of_week",
+    "month",
+    "is_weekend",
+    "aqi_lag_1",
+    "aqi_lag_24",
+    "aqi_rolling_24",
+    "pm25_rolling_24",
+    "pm10_rolling_24",
+    "co_rolling_24",
+    "aqi_change_rate",
+]
 
-# 2. Forecasting Target (What are we predicting?)
-# We want to predict the *average* AQI for Day 1, Day 2, and Day 3
-# Using forward rolling windows of 24 hours.
+
+def load_training_data() -> pd.DataFrame:
+    """Load processed features from Hopsworks with a local CSV fallback."""
+    print("Connecting to Hopsworks Feature Store...")
+    try:
+        import hopsworks
+
+        project = hopsworks.login()
+        feature_store = project.get_feature_store()
+        print(f"Fetching features from Feature Group '{FEATURE_GROUP_NAME}'...")
+        feature_group = feature_store.get_feature_group(FEATURE_GROUP_NAME, version=FEATURE_GROUP_VERSION)
+        dataframe = feature_group.read()
+        dataframe = dataframe.sort_values("timestamp").reset_index(drop=True)
+        return dataframe
+    except Exception as exc:
+        print(f"Could not read from Hopsworks Feature Store: {exc}")
+        print("Falling back to local CSV...")
+        return pd.read_csv("data/processed/features.csv")
+
+
+def get_target_series(dataframe: pd.DataFrame) -> pd.Series:
+    """Prefer US AQI and fall back to a rough OpenWeather conversion when needed."""
+    if "us_aqi" in dataframe.columns:
+        series = pd.to_numeric(dataframe["us_aqi"], errors="coerce")
+        if not series.dropna().empty:
+            return series
+    base = pd.to_numeric(dataframe["aqi"], errors="coerce")
+    return base * 50.0
+
+
+dataframe = load_training_data()
+dataframe["timestamp"] = pd.to_datetime(dataframe["timestamp"])
+dataframe = dataframe.sort_values("timestamp").reset_index(drop=True)
+
+aqi_target = get_target_series(dataframe)
 indexer = pd.api.indexers.FixedForwardWindowIndexer(window_size=24)
-df['target_day_1'] = df['aqi'].shift(-1).rolling(window=indexer).mean()
-df['target_day_2'] = df['aqi'].shift(-25).rolling(window=indexer).mean()
-df['target_day_3'] = df['aqi'].shift(-49).rolling(window=indexer).mean()
+dataframe["target_day_1"] = aqi_target.shift(-1).rolling(window=indexer).mean()
+dataframe["target_day_2"] = aqi_target.shift(-25).rolling(window=indexer).mean()
+dataframe["target_day_3"] = aqi_target.shift(-49).rolling(window=indexer).mean()
+dataframe = dataframe.dropna().reset_index(drop=True)
 
-# Drop rows that don't have enough future data to calculate the 3-day targets
-df = df.dropna()
+available_features = [column for column in FEATURE_COLUMNS if column in dataframe.columns]
+X = dataframe[available_features].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+y = dataframe[["target_day_1", "target_day_2", "target_day_3"]]
 
-# 3. Select Features
-features = ['aqi', 'co', 'no', 'no2', 'o3', 'so2', 'pm2_5', 'pm10', 'nh3', 
-            'hour', 'day_of_week', 'month', 'is_weekend', 'aqi_lag_1', 'aqi_lag_24', 'aqi_rolling_24']
-
-X = df[features]
-y = df[['target_day_1', 'target_day_2', 'target_day_3']]
-
-# 4. Train-Test Split (Chronological)
-train_size = int(len(df) * 0.8) # 80% past data
+train_size = int(len(dataframe) * 0.8)
 X_train, X_test = X.iloc[:train_size], X.iloc[train_size:]
 y_train, y_test = y.iloc[:train_size], y.iloc[train_size:]
 
-# 5. Feature Scaling
 scaler = StandardScaler()
 X_train_scaled = scaler.fit_transform(X_train)
 X_test_scaled = scaler.transform(X_test)
-joblib.dump(scaler, 'models/scaler.pkl') # Save scaler for dashboard
+joblib.dump(scaler, "models/scaler.pkl")
+joblib.dump(X_train.shape[1], "models/nn_input_dim.pkl")
 
-# ==========================================
-# MODEL 1: RIDGE REGRESSION (Linear Math)
-# ==========================================
 print("\n[1/4] Training Ridge Regression...")
 ridge = Ridge(alpha=1.0)
 ridge.fit(X_train_scaled, y_train)
 ridge_preds = ridge.predict(X_test_scaled)
-joblib.dump(ridge, 'models/ridge_model.pkl')
+joblib.dump(ridge, "models/ridge_model.pkl")
 
-# ==========================================
-# MODEL 2: RANDOM FOREST (Ensemble of Trees)
-# ==========================================
 print("[2/4] Training Random Forest...")
-rf = RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42, n_jobs=-1)
+rf = RandomForestRegressor(
+    n_estimators=200,
+    max_depth=12,
+    random_state=42,
+    n_jobs=-1,
+)
 rf.fit(X_train_scaled, y_train)
 rf_preds = rf.predict(X_test_scaled)
-joblib.dump(rf, 'models/rf_model.pkl')
+joblib.dump(rf, "models/rf_model.pkl")
 
-# ==========================================
-# MODEL 3: XGBOOST (Gradient Boosting)
-# ==========================================
 print("[3/4] Training XGBoost (Multi-Output)...")
-from sklearn.multioutput import MultiOutputRegressor
-# XGBoost requires wrapping for scikit-learn API multi-output in older versions, 
-# and it's safer for compatibility to use MultiOutputRegressor.
-xgb_base = xgb.XGBRegressor(n_estimators=100, max_depth=5, learning_rate=0.1, random_state=42)
+xgb_base = xgb.XGBRegressor(
+    n_estimators=150,
+    max_depth=5,
+    learning_rate=0.08,
+    subsample=0.9,
+    colsample_bytree=0.9,
+    random_state=42,
+)
 xgb_model = MultiOutputRegressor(xgb_base)
 xgb_model.fit(X_train_scaled, y_train)
 xgb_preds = xgb_model.predict(X_test_scaled)
-joblib.dump(xgb_model, 'models/xgb_model.pkl')
+joblib.dump(xgb_model, "models/xgb_model.pkl")
 
-# ==========================================
-# MODEL 4: PYTORCH NEURAL NETWORK (Deep Learning)
-# ==========================================
 print("[4/4] Training Custom PyTorch Neural Network...")
-# Neural networks need data formatted as "Tensors"
 X_train_tensor = torch.tensor(X_train_scaled, dtype=torch.float32)
-y_train_tensor = torch.tensor(y_train.values, dtype=torch.float32) # Shape: (N, 3)
+y_train_tensor = torch.tensor(y_train.values, dtype=torch.float32)
 X_test_tensor = torch.tensor(X_test_scaled, dtype=torch.float32)
 
-# Define a Feed-Forward Neural Network Architecture
+
 class AQIPredictorNN(nn.Module):
     def __init__(self, input_dim):
-        super(AQIPredictorNN, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(input_dim, 64)
         self.relu = nn.ReLU()
         self.fc2 = nn.Linear(64, 32)
-        # Output 3 continuous predictions (Day 1, Day 2, Day 3)
         self.fc3 = nn.Linear(32, 3)
 
-    def forward(self, x):
-        x = self.relu(self.fc1(x))
-        x = self.relu(self.fc2(x))
-        x = self.fc3(x)
-        return x
+    def forward(self, inputs):
+        outputs = self.relu(self.fc1(inputs))
+        outputs = self.relu(self.fc2(outputs))
+        return self.fc3(outputs)
+
 
 nn_model = AQIPredictorNN(X_train_tensor.shape[1])
-criterion = nn.MSELoss() 
+criterion = nn.MSELoss()
 optimizer = optim.Adam(nn_model.parameters(), lr=0.01)
 
-# Training Loop
-epochs = 100
-for epoch in range(epochs):
-    optimizer.zero_grad() 
-    outputs = nn_model(X_train_tensor) 
-    loss = criterion(outputs, y_train_tensor) 
-    loss.backward() 
-    optimizer.step() 
+for _ in range(100):
+    optimizer.zero_grad()
+    outputs = nn_model(X_train_tensor)
+    loss = criterion(outputs, y_train_tensor)
+    loss.backward()
+    optimizer.step()
 
-# Get Predictions
 nn_model.eval()
 with torch.no_grad():
     nn_preds = nn_model(X_test_tensor).numpy()
-    
-torch.save(nn_model.state_dict(), 'models/pytorch_model.pth')
 
-# ==========================================
-# PHASE 6: MODEL EVALUATION
-# ==========================================
-print("\n" + "="*40)
-print("🏆 MODEL EVALUATION RESULTS (Test Set Average across 3 Days) 🏆")
-print("="*40)
+torch.save(nn_model.state_dict(), "models/pytorch_model.pth")
+
+print("\n" + "=" * 40)
+print("MODEL EVALUATION RESULTS (Test Set Average across 3 Days)")
+print("=" * 40)
+
 
 def evaluate(name, y_true, y_pred):
-    rmse = np.sqrt(mean_squared_error(y_true, y_pred)) # Average across 3 targets
-    mae = mean_absolute_error(y_true, y_pred) 
-    r2 = r2_score(y_true, y_pred) 
-    print(f"{name}:\n  Avg RMSE: {rmse:.4f} | Avg MAE: {mae:.4f} | Avg R²: {r2:.4f}\n")
-    return r2
+    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+    mae = mean_absolute_error(y_true, y_pred)
+    r2 = r2_score(y_true, y_pred)
+    print(f"{name}:\n  Avg RMSE: {rmse:.4f} | Avg MAE: {mae:.4f} | Avg R2: {r2:.4f}\n")
+    return {"rmse": rmse, "mae": mae, "r2": r2}
 
-results = {}
-results['Ridge'] = evaluate("Ridge Regression", y_test, ridge_preds)
-results['Random Forest'] = evaluate("Random Forest", y_test, rf_preds)
-results['XGBoost'] = evaluate("XGBoost", y_test, xgb_preds)
-results['PyTorch NN'] = evaluate("PyTorch NN", y_test, nn_preds)
 
-best_model_name = max(results, key=results.get)
-print(f"🌟 BEST MODEL: {best_model_name} 🌟")
+results = {
+    "Ridge Regression": evaluate("Ridge Regression", y_test, ridge_preds),
+    "Random Forest": evaluate("Random Forest", y_test, rf_preds),
+    "XGBoost": evaluate("XGBoost", y_test, xgb_preds),
+    "PyTorch Deep Learning": evaluate("PyTorch NN", y_test, nn_preds),
+}
 
-pd.DataFrame({
-    'Model': list(results.keys()),
-    'R2_Score': list(results.values())
-}).to_csv('reports/model_metrics.csv', index=False)
+best_model_name = min(results, key=lambda key: results[key]["rmse"])
+print(f"BEST MODEL: {best_model_name}")
 
-# ==========================================
-# PHASE 7: HOPSWORKS MODEL REGISTRY
-# ==========================================
-print("\n" + "="*40)
-print("☁️ UPLOADING TO HOPSWORKS MODEL REGISTRY ☁️")
-print("="*40)
+pd.DataFrame(
+    [
+        {
+            "Model": model_name,
+            "RMSE": metrics["rmse"],
+            "MAE": metrics["mae"],
+            "R2_Score": metrics["r2"],
+            "Is_Best_Model": model_name == best_model_name,
+        }
+        for model_name, metrics in results.items()
+    ]
+).to_csv("reports/model_metrics.csv", index=False)
+
+print("\n" + "=" * 40)
+print("UPLOADING TO HOPSWORKS MODEL REGISTRY")
+print("=" * 40)
+
+
+def build_registry_metrics(model_name: str) -> dict[str, float | str | int]:
+    metrics = dict(results[model_name])
+    metrics["feature_count"] = len(available_features)
+    return metrics
+
 
 try:
+    import hopsworks
+
     project = hopsworks.login()
-    mr = project.get_model_registry()
-    
-    print("Uploading XGBoost model...")
-    xgb_hw_model = mr.python.create_model(
+    model_registry = project.get_model_registry()
+
+    xgb_hw_model = model_registry.python.create_model(
         name="aqi_xgboost_model",
-        metrics={"r2_avg": results['XGBoost']},
-        description="XGBoost model predicting Next 3 Days AQI"
+        metrics=build_registry_metrics("XGBoost"),
+        description="XGBoost model predicting next 3 days AQI",
     )
-    xgb_hw_model.save('models/xgb_model.pkl')
-    
-    print("Uploading PyTorch model...")
-    pytorch_hw_model = mr.python.create_model(
+    xgb_hw_model.save("models/xgb_model.pkl")
+
+    pytorch_hw_model = model_registry.python.create_model(
         name="aqi_pytorch_model",
-        metrics={"r2_avg": results['PyTorch NN']},
-        description="PyTorch NN predicting Next 3 Days AQI"
+        metrics=build_registry_metrics("PyTorch Deep Learning"),
+        description="PyTorch neural network predicting next 3 days AQI",
     )
-    pytorch_hw_model.save('models/pytorch_model.pth')
+    pytorch_hw_model.save("models/pytorch_model.pth")
 
-    print("Uploading Random Forest model...")
-    rf_hw_model = mr.python.create_model(
+    rf_hw_model = model_registry.python.create_model(
         name="aqi_rf_model",
-        metrics={"r2_avg": results['Random Forest']},
-        description="Random Forest model predicting Next 3 Days AQI"
+        metrics=build_registry_metrics("Random Forest"),
+        description="Random Forest model predicting next 3 days AQI",
     )
-    rf_hw_model.save('models/rf_model.pkl')
+    rf_hw_model.save("models/rf_model.pkl")
 
-    print("Uploading Ridge model...")
-    ridge_hw_model = mr.python.create_model(
+    ridge_hw_model = model_registry.python.create_model(
         name="aqi_ridge_model",
-        metrics={"r2_avg": results['Ridge']},
-        description="Ridge Regression model predicting Next 3 Days AQI"
+        metrics=build_registry_metrics("Ridge Regression"),
+        description="Ridge Regression model predicting next 3 days AQI",
     )
-    ridge_hw_model.save('models/ridge_model.pkl')
+    ridge_hw_model.save("models/ridge_model.pkl")
 
-    print("Uploading Scaler...")
-    scaler_hw_model = mr.python.create_model(
+    scaler_hw_model = model_registry.python.create_model(
         name="aqi_scaler",
-        description="StandardScaler for AQI features"
+        description="StandardScaler for AQI features",
     )
-    scaler_hw_model.save('models/scaler.pkl')
-    
+    scaler_hw_model.save("models/scaler.pkl")
+
     print("Successfully uploaded all models and scaler to Hopsworks Registry!")
-except Exception as e:
-    print(f"Failed to upload models to Hopsworks: {e}")
-
-
+except Exception as exc:
+    print(f"Failed to upload models to Hopsworks: {exc}")

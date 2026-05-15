@@ -1,6 +1,31 @@
-venv/
-__pycache__/
+# Secrets and environments
 .env
-*.pyc
-*.pkl
-*.pth
+.env.local
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Model and training artifacts
+models/*.pkl
+models/*.pth
+reports/*.png
+reports/*.csv
+reports/explainability/*.png
+
+# Raw data
+data/raw/*.csv
+data/raw/*.json
+
+# IDE and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local runtime logs
+streamlit.out.log
+streamlit.err.log
