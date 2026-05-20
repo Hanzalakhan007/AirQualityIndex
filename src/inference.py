@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from functools import lru_cache
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -10,9 +11,14 @@ import joblib
 import numpy as np
 import pandas as pd
 import requests
-import torch
-import torch.nn as nn
+from gridfs import GridFSBucket
+from pymongo import MongoClient
 from zoneinfo import ZoneInfo
+
+try:
+    import certifi
+except ImportError:  # pragma: no cover - optional dependency
+    certifi = None
 
 from config.settings import (
     AQI_CALIBRATION_ENABLED,
@@ -22,66 +28,41 @@ from config.settings import (
     DEFAULT_LAT,
     DEFAULT_LON,
     EXPLAINABILITY_DIR,
-    FEATURE_GROUP_NAME,
-    FEATURE_GROUP_VERSION,
     KARACHI_REFERENCE_AQI,
-    MODEL_REGISTRY_FALLBACK_VERSIONS,
     MODEL_REGISTRY_NAMES,
     MODELS_DIR,
+    MONGO_DB_NAME,
+    MONGO_FEATURES_COLLECTION,
+    MONGO_MODEL_BUCKET,
+    MONGO_MODEL_REGISTRY_COLLECTION,
+    MONGO_URI,
     OPEN_METEO_AIR_QUALITY,
     PROCESSED_DIR,
+    REPORTS_DIR,
     SCALER_REGISTRY_FILENAME,
     SCALER_REGISTRY_NAME,
     TIMEZONE,
 )
-
-FEATURE_COLUMNS = [
-    "us_aqi",
-    "co",
-    "no",
-    "no2",
-    "o3",
-    "so2",
-    "pm2_5",
-    "pm10",
-    "nh3",
-    "hour",
-    "day_of_week",
-    "month",
-    "is_weekend",
-    "aqi_lag_1",
-    "aqi_lag_24",
-    "aqi_rolling_24",
-    "pm25_rolling_24",
-    "pm10_rolling_24",
-    "co_rolling_24",
-    "aqi_change_rate",
-]
+from src.schema import FEATURE_COLUMNS
 
 MODEL_OPTIONS = ["Best Available"] + list(MODEL_REGISTRY_NAMES.keys())
 SLIDER_FEATURES = ["co", "no2", "o3", "pm2_5", "pm10", "nh3"]
-
-
-class AQIPredictorNN(nn.Module):
-    """Neural network used by the training pipeline."""
-
-    def __init__(self, input_dim: int) -> None:
-        super().__init__()
-        self.fc1 = nn.Linear(input_dim, 64)
-        self.relu = nn.ReLU()
-        self.fc2 = nn.Linear(64, 32)
-        self.fc3 = nn.Linear(32, 3)
-
-    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        outputs = self.relu(self.fc1(inputs))
-        outputs = self.relu(self.fc2(outputs))
-        return self.fc3(outputs)
+LOCAL_FEATURES_FILE = PROCESSED_DIR / "features.csv"
+LOCAL_METRICS_FILE = REPORTS_DIR / "model_metrics.csv"
+LOCAL_MODEL_FILES = {
+    "Ridge Regression": MODELS_DIR / "ridge_model.pkl",
+    "Random Forest": MODELS_DIR / "rf_model.pkl",
+    "XGBoost": MODELS_DIR / "xgb_model.pkl",
+}
+LOCAL_SCALER_FILE = MODELS_DIR / SCALER_REGISTRY_FILENAME
 
 
 def clear_caches() -> None:
     """Clear cached models and feature data."""
     load_feature_data.cache_clear()
     load_models.cache_clear()
+    get_model_registry_metadata.cache_clear()
+    get_mongo_database.cache_clear()
 
 
 def normalize_aqi_value(value: float | None, pm25: float | None = None) -> float | None:
@@ -152,64 +133,114 @@ def health_recommendation(aqi: float | None) -> str:
     return "Avoid prolonged outdoor activity and stay indoors when possible."
 
 
-def _load_optional_hopsworks():
+@lru_cache(maxsize=1)
+def get_mongo_database():
+    client_kwargs = {
+        "serverSelectionTimeoutMS": 8000,
+        "socketTimeoutMS": 20000,
+        "connectTimeoutMS": 20000,
+    }
+    if certifi is not None:
+        client_kwargs["tlsCAFile"] = certifi.where()
     try:
-        import hopsworks  # type: ignore
-    except Exception:
-        return None
-    try:
-        return hopsworks.login()
-    except Exception:
-        return None
+        client = MongoClient(MONGO_URI, **client_kwargs)
+        client.admin.command("ping")
+    except Exception as exc:
+        raise RuntimeError(f"Unable to connect to MongoDB: {exc}") from exc
+    return client[MONGO_DB_NAME]
 
 
-def _get_registry_model(project: Any, registry_name: str, fallback_version: int | None = None):
-    try:
-        model_registry = project.get_model_registry()
-        try:
-            registry_models = model_registry.get_models(name=registry_name)
-            if registry_models:
-                return max(registry_models, key=lambda item: int(getattr(item, "version", 0) or 0))
-        except Exception:
-            if fallback_version is not None:
-                return model_registry.get_model(name=registry_name, version=fallback_version)
-            return model_registry.get_model(name=registry_name)
-    except Exception:
-        return None
+def _latest_registry_document(registry_name: str) -> dict[str, Any] | None:
+    database = get_mongo_database()
+    return database[MONGO_MODEL_REGISTRY_COLLECTION].find_one(
+        {"registry_name": registry_name},
+        sort=[("version", -1), ("created_at", -1)],
+    )
 
 
-def _download_registry_file(model_obj: Any, expected_filename: str) -> Path | None:
-    try:
-        download_dir = Path(model_obj.download())
-        exact_match = download_dir / expected_filename
-        if exact_match.exists():
-            return exact_match
-        for candidate in download_dir.rglob(expected_filename):
-            if candidate.is_file():
-                return candidate
-    except Exception:
-        return None
-    return None
-
-
-def _load_pytorch_model(model_path: Path, feature_count: int | None = None) -> AQIPredictorNN | None:
-    if not model_path.exists():
+def _download_artifact_bytes(file_id: Any) -> BytesIO | None:
+    if file_id is None:
         return None
     try:
-        input_dim_path = MODELS_DIR / "nn_input_dim.pkl"
-        if input_dim_path.exists():
-            input_dim = int(joblib.load(input_dim_path))
-        elif feature_count is not None:
-            input_dim = int(feature_count)
-        else:
-            input_dim = len(FEATURE_COLUMNS)
-        model = AQIPredictorNN(input_dim)
-        state_dict = torch.load(model_path, map_location="cpu")
-        model.load_state_dict(state_dict)
-        model.eval()
-        return model
+        bucket = GridFSBucket(get_mongo_database(), bucket_name=MONGO_MODEL_BUCKET)
+        stream = bucket.open_download_stream(file_id)
+        return BytesIO(stream.read())
     except Exception:
         return None
+
+
+def _load_local_feature_data() -> pd.DataFrame:
+    if not LOCAL_FEATURES_FILE.exists():
+        raise RuntimeError(
+            "MongoDB is unavailable and no local fallback feature file was found at "
+            f"'{LOCAL_FEATURES_FILE}'."
+        )
+    dataframe = pd.read_csv(LOCAL_FEATURES_FILE)
+    if "timestamp" not in dataframe.columns:
+        raise RuntimeError(f"Local fallback feature file '{LOCAL_FEATURES_FILE}' does not contain a timestamp column.")
+    dataframe["timestamp"] = pd.to_datetime(dataframe["timestamp"])
+    return dataframe.sort_values("timestamp").reset_index(drop=True)
+
+
+def _load_local_metrics_metadata() -> dict[str, dict[str, Any]]:
+    if not LOCAL_METRICS_FILE.exists():
+        return {}
+
+    dataframe = pd.read_csv(LOCAL_METRICS_FILE)
+    metadata: dict[str, dict[str, Any]] = {}
+    for _, row in dataframe.iterrows():
+        label = str(row.get("Model", "")).strip()
+        if not label:
+            continue
+        metrics = {
+            "rmse": float(row.get("RMSE", 999999.0)),
+            "mae": float(row.get("MAE", 999999.0)),
+            "r2": float(row.get("R2_Score", row.get("R2", -999999.0))),
+            "selection_score": float(row.get("Selection_Score", row.get("RMSE", 999999.0))),
+            "fit_status": str(row.get("Fit_Status", "unknown")),
+            "train_rmse": float(row.get("Train_RMSE", row.get("RMSE", 999999.0))),
+            "rmse_gap": float(row.get("RMSE_Gap", 0.0)),
+        }
+        metadata[label] = {
+            "registry_name": MODEL_REGISTRY_NAMES.get(label, ("", "", ""))[0],
+            "metrics": metrics,
+            "filename": LOCAL_MODEL_FILES.get(label, Path("")).name,
+            "feature_count": len(FEATURE_COLUMNS),
+        }
+    return metadata
+
+
+def _load_local_models(requested_models: tuple[str, ...] | None = None) -> tuple[dict[str, Any], Any, dict[str, dict[str, Any]]]:
+    selected_labels = requested_models or tuple(MODEL_REGISTRY_NAMES.keys())
+    scaler = None
+    if LOCAL_SCALER_FILE.exists():
+        scaler = joblib.load(LOCAL_SCALER_FILE)
+
+    models: dict[str, Any] = {}
+    metadata = _load_local_metrics_metadata()
+    for label in selected_labels:
+        model_path = LOCAL_MODEL_FILES.get(label)
+        if model_path is None or not model_path.exists():
+            continue
+        models[label] = joblib.load(model_path)
+        metadata.setdefault(
+            label,
+            {
+                "registry_name": MODEL_REGISTRY_NAMES.get(label, ("", "", ""))[0],
+                "metrics": {},
+                "filename": model_path.name,
+                "feature_count": len(FEATURE_COLUMNS),
+            },
+        )
+
+    if scaler is None:
+        raise RuntimeError(
+            "MongoDB is unavailable and no local fallback scaler file was found at "
+            f"'{LOCAL_SCALER_FILE}'."
+        )
+    if not models:
+        raise RuntimeError("MongoDB is unavailable and no local fallback model artifacts were found.")
+    return models, scaler, metadata
 
 
 def _model_metrics_value(metrics: dict[str, Any], metric_name: str, default: float) -> float:
@@ -236,98 +267,101 @@ def _align_input_frame(input_frame: pd.DataFrame, scaler: Any) -> pd.DataFrame:
 
 
 @lru_cache(maxsize=1)
-def load_models() -> tuple[dict[str, Any], Any, dict[str, dict[str, Any]]]:
-    """Load latest trained models and scaler from Hopsworks or local disk."""
-    models: dict[str, Any] = {}
+def get_model_registry_metadata() -> dict[str, dict[str, Any]]:
+    """Fetch model-registry metadata without downloading model artifacts."""
     metadata: dict[str, dict[str, Any]] = {}
-    scaler = None
-    project = _load_optional_hopsworks()
+    try:
+        for label, (registry_name, _, _) in MODEL_REGISTRY_NAMES.items():
+            document = _latest_registry_document(registry_name)
+            if document is None:
+                continue
+            metadata[label] = {
+                "registry_name": registry_name,
+                "metrics": document.get("metrics", {}) or {},
+                "version": document.get("version"),
+                "feature_count": document.get("feature_count"),
+            }
+    except Exception:
+        metadata = {}
 
-    if project is not None:
-        scaler_obj = _get_registry_model(project, SCALER_REGISTRY_NAME)
-        if scaler_obj is not None:
-            scaler_path = _download_registry_file(scaler_obj, SCALER_REGISTRY_FILENAME)
-            if scaler_path is not None:
+    if metadata:
+        return metadata
+
+    metadata = _load_local_metrics_metadata()
+    return metadata
+
+
+@lru_cache(maxsize=8)
+def load_models(requested_models: tuple[str, ...] | None = None) -> tuple[dict[str, Any], Any, dict[str, dict[str, Any]]]:
+    """Load requested trained models and scaler from the MongoDB model registry."""
+    selected_labels = requested_models or tuple(MODEL_REGISTRY_NAMES.keys())
+    try:
+        models: dict[str, Any] = {}
+        metadata = get_model_registry_metadata()
+        scaler = None
+        scaler_document = _latest_registry_document(SCALER_REGISTRY_NAME)
+        if scaler_document is not None:
+            scaler_file = _download_artifact_bytes(scaler_document.get("artifact_file_id"))
+            if scaler_file is not None:
                 try:
-                    scaler = joblib.load(scaler_path)
+                    scaler_file.seek(0)
+                    scaler = joblib.load(scaler_file)
                 except Exception:
                     scaler = None
 
-    if scaler is None:
-        local_scaler = MODELS_DIR / SCALER_REGISTRY_FILENAME
-        if local_scaler.exists():
-            scaler = joblib.load(local_scaler)
+        for label in selected_labels:
+            if label not in MODEL_REGISTRY_NAMES:
+                continue
 
-    for label, (registry_name, filename, model_kind) in MODEL_REGISTRY_NAMES.items():
-        model_obj = None
-        metrics: dict[str, Any] = {}
-        version = None
+            registry_name, filename, _model_kind = MODEL_REGISTRY_NAMES[label]
+            document = _latest_registry_document(registry_name)
+            if document is None:
+                continue
 
-        if project is not None:
-            model_obj = _get_registry_model(project, registry_name, MODEL_REGISTRY_FALLBACK_VERSIONS.get(label))
-            if model_obj is not None:
-                metrics = getattr(model_obj, "metrics", {}) or {}
-                version = getattr(model_obj, "version", None)
+            artifact_file = _download_artifact_bytes(document.get("artifact_file_id"))
+            if artifact_file is None:
+                continue
 
-        candidate_path: Path | None = _download_registry_file(model_obj, filename) if model_obj is not None else None
-        if candidate_path is None:
-            local_path = MODELS_DIR / filename
-            if local_path.exists():
-                candidate_path = local_path
-
-        if candidate_path is None:
-            continue
-
-        if model_kind == "pytorch":
-            model = _load_pytorch_model(candidate_path, metrics.get("feature_count"))
-        else:
             try:
-                model = joblib.load(candidate_path)
+                artifact_file.seek(0)
+                model = joblib.load(artifact_file)
             except Exception:
                 model = None
 
-        if model is None:
-            continue
+            if model is None:
+                continue
 
-        models[label] = model
-        metadata[label] = {
-            "registry_name": registry_name,
-            "metrics": metrics,
-            "version": version,
-        }
+            models[label] = model
+            metadata[label] = {
+                "registry_name": registry_name,
+                "metrics": document.get("metrics", {}) or {},
+                "version": document.get("version"),
+                "filename": document.get("filename", filename),
+                "feature_count": document.get("feature_count"),
+            }
 
-    return models, scaler, metadata
+        if scaler is not None and models:
+            return models, scaler, metadata
+    except Exception:
+        pass
+
+    return _load_local_models(selected_labels)
 
 
 def get_model_leaderboard() -> list[dict[str, Any]]:
-    """Return model metrics sorted by best RMSE / R2."""
-    _, _, metadata = load_models()
+    """Return model-registry metrics sorted by best validation performance."""
+    metadata = get_model_registry_metadata()
     leaderboard = []
-    metrics_path = Path("reports/model_metrics.csv")
-    csv_metrics: dict[str, dict[str, float]] = {}
-
-    if metrics_path.exists():
-        try:
-            fallback = pd.read_csv(metrics_path)
-            for _, row in fallback.iterrows():
-                model_name = str(row.get("Model"))
-                csv_metrics[model_name] = {
-                    "rmse": float(row.get("RMSE", 999999.0)),
-                    "mae": float(row.get("MAE", 999999.0)),
-                    "r2": float(row.get("R2_Score", -999999.0)),
-                }
-        except Exception:
-            csv_metrics = {}
 
     for label, info in metadata.items():
         metrics = info.get("metrics", {}) or {}
-        fallback_metrics = csv_metrics.get(label, {})
-        rmse = _model_metrics_value(metrics, "rmse", fallback_metrics.get("rmse", 999999.0))
-        mae = _model_metrics_value(metrics, "mae", fallback_metrics.get("mae", 999999.0))
+        rmse = _model_metrics_value(metrics, "rmse", 999999.0)
+        mae = _model_metrics_value(metrics, "mae", 999999.0)
+        selection_score = _model_metrics_value(metrics, "selection_score", rmse)
         r2 = _model_metrics_value(
             metrics,
             "r2",
-            _model_metrics_value(metrics, "r2_avg", fallback_metrics.get("r2", -999999.0)),
+            _model_metrics_value(metrics, "r2_avg", -999999.0),
         )
         leaderboard.append(
             {
@@ -335,22 +369,12 @@ def get_model_leaderboard() -> list[dict[str, Any]]:
                 "rmse": rmse,
                 "mae": mae,
                 "r2": r2,
+                "selection_score": selection_score,
+                "fit_status": metrics.get("fit_status", "unknown"),
                 "version": info.get("version"),
             }
         )
-
-    if not leaderboard:
-        for model_name, metric_values in csv_metrics.items():
-            leaderboard.append(
-                {
-                    "model": model_name,
-                    "rmse": metric_values["rmse"],
-                    "mae": metric_values["mae"],
-                    "r2": metric_values["r2"],
-                    "version": None,
-                }
-            )
-    return sorted(leaderboard, key=lambda item: (item["rmse"], -item["r2"]))
+    return sorted(leaderboard, key=lambda item: (item["selection_score"], item["rmse"], -item["r2"]))
 
 
 def get_default_model_name() -> str:
@@ -365,25 +389,18 @@ def get_default_model_name() -> str:
 
 @lru_cache(maxsize=1)
 def load_feature_data() -> pd.DataFrame:
-    """Load feature data from Hopsworks with a local CSV fallback."""
-    project = _load_optional_hopsworks()
-    if project is not None:
-        try:
-            feature_store = project.get_feature_store()
-            feature_group = feature_store.get_feature_group(FEATURE_GROUP_NAME, version=FEATURE_GROUP_VERSION)
-            dataframe = feature_group.read()
+    """Load feature data from the MongoDB feature store."""
+    try:
+        collection = get_mongo_database()[MONGO_FEATURES_COLLECTION]
+        rows = list(collection.find({}, {"_id": 0}).sort("timestamp", 1))
+        if rows:
+            dataframe = pd.DataFrame(rows)
             dataframe["timestamp"] = pd.to_datetime(dataframe["timestamp"])
             return dataframe.sort_values("timestamp").reset_index(drop=True)
-        except Exception:
-            pass
+    except Exception:
+        pass
 
-    local_features = PROCESSED_DIR / "features.csv"
-    if not local_features.exists():
-        raise FileNotFoundError("No processed feature dataset found.")
-
-    dataframe = pd.read_csv(local_features)
-    dataframe["timestamp"] = pd.to_datetime(dataframe["timestamp"])
-    return dataframe.sort_values("timestamp").reset_index(drop=True)
+    return _load_local_feature_data()
 
 
 def get_latest_feature_row() -> pd.Series:
@@ -394,7 +411,7 @@ def get_latest_feature_row() -> pd.Series:
 
 
 def build_input_frame(latest_row: pd.Series, overrides: dict[str, float] | None = None) -> pd.DataFrame:
-    """Create a single-row feature frame aligned to the training columns."""
+    """Create a single-row feature frame aligned to the model training columns."""
     overrides = overrides or {}
     now_local = datetime.now(ZoneInfo(TIMEZONE))
     current_us_aqi = normalize_aqi_value(
@@ -403,7 +420,7 @@ def build_input_frame(latest_row: pd.Series, overrides: dict[str, float] | None 
     ) or 0.0
 
     frame = {
-        "us_aqi": float(overrides.get("us_aqi", current_us_aqi)),
+        "aqi": float(overrides.get("aqi", current_us_aqi)),
         "co": float(overrides.get("co", latest_row.get("co", 0.0))),
         "no": float(overrides.get("no", latest_row.get("no", 0.0))),
         "no2": float(overrides.get("no2", latest_row.get("no2", 0.0))),
@@ -418,11 +435,9 @@ def build_input_frame(latest_row: pd.Series, overrides: dict[str, float] | None 
         "is_weekend": int(overrides.get("is_weekend", 1 if now_local.weekday() >= 5 else 0)),
         "aqi_lag_1": float(overrides.get("aqi_lag_1", latest_row.get("aqi_lag_1", current_us_aqi))),
         "aqi_lag_24": float(overrides.get("aqi_lag_24", latest_row.get("aqi_lag_24", current_us_aqi))),
+        "aqi_lag_48": float(overrides.get("aqi_lag_48", latest_row.get("aqi_lag_48", current_us_aqi))),
+        "aqi_lag_72": float(overrides.get("aqi_lag_72", latest_row.get("aqi_lag_72", current_us_aqi))),
         "aqi_rolling_24": float(overrides.get("aqi_rolling_24", latest_row.get("aqi_rolling_24", current_us_aqi))),
-        "pm25_rolling_24": float(overrides.get("pm25_rolling_24", latest_row.get("pm25_rolling_24", latest_row.get("pm2_5", 0.0)))),
-        "pm10_rolling_24": float(overrides.get("pm10_rolling_24", latest_row.get("pm10_rolling_24", latest_row.get("pm10", 0.0)))),
-        "co_rolling_24": float(overrides.get("co_rolling_24", latest_row.get("co_rolling_24", latest_row.get("co", 0.0)))),
-        "aqi_change_rate": float(overrides.get("aqi_change_rate", latest_row.get("aqi_change_rate", 0.0))),
     }
     return pd.DataFrame([frame], columns=FEATURE_COLUMNS)
 
@@ -445,11 +460,11 @@ def fetch_openmeteo_snapshot() -> dict[str, Any] | None:
 
 def predict_next_days(model_name: str | None = None, overrides: dict[str, float] | None = None) -> dict[str, Any]:
     """Generate a three-day AQI forecast."""
-    models, scaler, metadata = load_models()
-    if scaler is None:
-        raise RuntimeError("Scaler could not be loaded from Hopsworks or local models.")
-
+    metadata = get_model_registry_metadata()
     selected_model = get_default_model_name() if not model_name or model_name == "Best Available" else model_name
+    models, scaler, _ = load_models((selected_model,))
+    if scaler is None:
+        raise RuntimeError("Scaler could not be loaded from MongoDB model registry.")
     if selected_model not in models:
         raise RuntimeError(f"Model '{selected_model}' is not available.")
 
@@ -459,12 +474,7 @@ def predict_next_days(model_name: str | None = None, overrides: dict[str, float]
     scaled_input = scaler.transform(aligned_input)
     model = models[selected_model]
 
-    if selected_model == "PyTorch Deep Learning":
-        tensor_input = torch.tensor(scaled_input, dtype=torch.float32)
-        with torch.no_grad():
-            raw_prediction = model(tensor_input).cpu().numpy()[0]
-    else:
-        raw_prediction = np.ravel(model.predict(scaled_input))
+    raw_prediction = np.ravel(model.predict(scaled_input))
 
     predictions = [calibrate_aqi(max(1.0, float(value))) or 0.0 for value in raw_prediction[:3]]
     now_local = datetime.now(ZoneInfo(TIMEZONE))
@@ -501,20 +511,11 @@ def get_current_aqi() -> tuple[float | None, str]:
 
 
 def get_recent_daily_history(days: int = 14) -> pd.DataFrame:
-    """Return recent daily AQI history for charting."""
-    daily_path = PROCESSED_DIR / "daily_features.csv"
-    if daily_path.exists():
-        dataframe = pd.read_csv(daily_path)
-        date_column = "date" if "date" in dataframe.columns else "timestamp"
-        dataframe[date_column] = pd.to_datetime(dataframe[date_column])
-        aqi_column = "us_aqi" if "us_aqi" in dataframe.columns else "aqi"
-        dataframe["aqi_display"] = dataframe[aqi_column].apply(normalize_aqi_value)
-        return dataframe.sort_values(date_column).tail(days).reset_index(drop=True)
-
+    """Return recent daily AQI history derived from the feature store."""
     dataframe = load_feature_data().copy()
     dataframe["timestamp"] = pd.to_datetime(dataframe["timestamp"])
     dataframe["aqi_display"] = dataframe.apply(
-        lambda row: normalize_aqi_value(row.get("us_aqi"), row.get("pm2_5")),
+        lambda row: normalize_aqi_value(row.get("aqi", row.get("us_aqi")), row.get("pm2_5")),
         axis=1,
     )
     history = (

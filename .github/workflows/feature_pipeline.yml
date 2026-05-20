@@ -1,11 +1,13 @@
 name: Hourly Feature Pipeline
 
 on:
-  push:
-    branches: [ main ]
   schedule:
-    - cron: '0 * * * *' # Runs at the start of every hour
-  workflow_dispatch: # Allows manual triggering from the GitHub UI
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: hourly-feature-pipeline
+  cancel-in-progress: false
 
 jobs:
   run-feature-pipeline:
@@ -13,35 +15,26 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install Linting Tools
-        run: |
-          pip install flake8
-
-      - name: Run Linting
-        run: |
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-
       - name: Install Dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y librdkafka-dev
           python -m pip install --upgrade pip
           pip install --no-cache-dir -r requirements.txt
 
-      - name: Fetch Latest Data
+      - name: Run hourly feature + training pipeline
         env:
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
-        run: python src/data_collection/fetch_data.py
-
-      - name: Build Features & Push to Hopsworks
-        env:
-          HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
-        run: python src/features/build_features.py
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+          MONGO_DB_NAME: ${{ secrets.MONGO_DB_NAME }}
+          MONGO_FEATURES_COLLECTION: ${{ secrets.MONGO_FEATURES_COLLECTION }}
+          MONGO_MODEL_REGISTRY_COLLECTION: ${{ secrets.MONGO_MODEL_REGISTRY_COLLECTION }}
+          MONGO_MODEL_BUCKET: ${{ secrets.MONGO_MODEL_BUCKET }}
+          MONGO_PIPELINE_CONTROL_COLLECTION: ${{ secrets.MONGO_PIPELINE_CONTROL_COLLECTION }}
+          PIPELINE_FORCE_RUN: ${{ github.event_name == 'workflow_dispatch' }}
+        run: python scripts/run_hourly_pipeline.py

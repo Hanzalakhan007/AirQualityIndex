@@ -1,6 +1,6 @@
 # Air Quality Index Predictor
 
-This project predicts the **next 3 days of AQI** from historical pollution data, engineered time features, and multiple ML models. It keeps your original Hopsworks-based pipeline, but now also includes the missing production-style structure your friend added: shared config, an API entrypoint, Streamlit theming, wrapper scripts, and deployment docs.
+This project predicts the **next 3 days of AQI** from historical pollution data, engineered time features, and multiple ML models. It uses MongoDB as both the feature store and model registry, plus shared config, an API entrypoint, Streamlit theming, wrapper scripts, and deployment docs.
 
 ## What is included
 
@@ -15,7 +15,7 @@ This project predicts the **next 3 days of AQI** from historical pollution data,
 
 1. Create and activate a virtual environment.
 2. Install dependencies with `pip install -r requirements.txt`.
-3. Copy `.env.example` to `.env` and set your API keys.
+3. Copy `.env.example` to `.env` and set your OpenWeather and MongoDB settings.
 4. Run the pipeline:
 
 ```bash
@@ -52,6 +52,6 @@ src/                    Core data science code
 
 ## Notes
 
-- The dashboard and API both fall back to local `models/` and `data/processed/features.csv` if Hopsworks is unavailable.
+- The dashboard and API read features and model artifacts from MongoDB at runtime.
 - `verify_prediction.py` is included as a lightweight smoke test for CI.
 - Existing tracked data and model files are preserved.

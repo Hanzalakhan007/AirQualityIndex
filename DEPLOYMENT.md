@@ -6,7 +6,7 @@
 2. In Streamlit Cloud, create a new app and point it to `app.py`.
 3. Add secrets for:
    - `OPENWEATHER_API_KEY`
-   - `HOPSWORKS_API_KEY` if you use Hopsworks remotely
+   - `MONGO_URI`, `MONGO_DB_NAME`, `MONGO_FEATURES_COLLECTION`, `MONGO_MODEL_REGISTRY_COLLECTION`, `MONGO_MODEL_BUCKET`
    - `AQI_CITY`, `AQI_LAT`, `AQI_LON`, `AQI_TIMEZONE`
 4. Deploy and verify the dashboard loads predictions.
 

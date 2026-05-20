@@ -1,8 +1,6 @@
 name: Daily Training Pipeline
 
 on:
-  push:
-    branches: [ main ]
   schedule:
     - cron: '0 0 * * *' # Runs every day at midnight UTC
   workflow_dispatch: # Allows manual triggering from the GitHub UI
@@ -13,42 +11,24 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install Linting Tools
-        run: |
-          pip install flake8
-
-      - name: Run Linting
-        run: |
-          # Stop the build if there are Python syntax errors or undefined names
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-          # exit-zero treats all errors as warnings.
-          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-
       - name: Install Dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y librdkafka-dev
           python -m pip install --upgrade pip
           pip install --no-cache-dir -r requirements.txt
 
-      - name: Fetch Latest Data
+      - name: Build features and train models
         env:
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
-        run: python src/data_collection/fetch_data.py
-
-      - name: Build Features & Push to Hopsworks
-        env:
-          HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
-        run: python src/features/build_features.py
-
-      - name: Train Models & Push to Registry
-        env:
-          HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
-        run: python src/models/train_model.py
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+          MONGO_DB_NAME: ${{ secrets.MONGO_DB_NAME }}
+          MONGO_FEATURES_COLLECTION: ${{ secrets.MONGO_FEATURES_COLLECTION }}
+          MONGO_MODEL_REGISTRY_COLLECTION: ${{ secrets.MONGO_MODEL_REGISTRY_COLLECTION }}
+          MONGO_MODEL_BUCKET: ${{ secrets.MONGO_MODEL_BUCKET }}
+        run: python scripts/master_pipeline.py

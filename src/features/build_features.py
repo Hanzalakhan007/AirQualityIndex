@@ -1,17 +1,49 @@
-import os
 import sys
+import time
+import json
 from pathlib import Path
 
 import pandas as pd
 from dotenv import load_dotenv
+from pymongo import ReplaceOne
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from config.settings import FEATURE_GROUP_NAME, FEATURE_GROUP_VERSION
+from config.settings import (
+    DEFAULT_LAT,
+    DEFAULT_LON,
+    MONGO_DB_NAME,
+    MONGO_FEATURES_COLLECTION,
+    MONGO_URI,
+)
+from src.data_collection.fetch_data import fetch_historical_aqi, fetch_openmeteo_historical_aqi, process_raw_data
+from src.schema import FEATURE_COLUMNS
 
 load_dotenv()
 
 print("Starting Feature Engineering...")
+
+
+def fetch_historical_aqi_chunks(start_time: int, end_time: int, chunk_days: int = 30) -> list[dict]:
+    """Fetch OpenWeather history in chunks to avoid large-response timeouts."""
+    chunk_seconds = chunk_days * 24 * 60 * 60
+    rows: list[dict] = []
+    current_start = start_time
+    while current_start < end_time:
+        current_end = min(end_time, current_start + chunk_seconds)
+        chunk = fetch_historical_aqi(DEFAULT_LAT, DEFAULT_LON, current_start, current_end)
+        source = "OpenWeather"
+        if not chunk:
+            print("OpenWeather chunk failed or returned no data; trying Open-Meteo fallback.")
+            chunk = fetch_openmeteo_historical_aqi(DEFAULT_LAT, DEFAULT_LON, current_start, current_end)
+            source = "Open-Meteo"
+        if chunk:
+            rows.extend(chunk)
+            print(f"Fetched {len(chunk)} {source} rows; running total: {len(rows)}")
+        else:
+            print(f"No data returned for chunk {current_start} -> {current_end}")
+        current_start = current_end + 1
+    return rows
 
 
 def build_daily_features(hourly_df: pd.DataFrame) -> pd.DataFrame:
@@ -50,8 +82,8 @@ def build_daily_features(hourly_df: pd.DataFrame) -> pd.DataFrame:
     return grouped.dropna().reset_index(drop=True)
 
 
-def build_features(input_path: str, output_path: str) -> None:
-    dataframe = pd.read_csv(input_path)
+def _build_feature_dataframe(dataframe: pd.DataFrame) -> pd.DataFrame:
+    dataframe = dataframe.copy()
     dataframe["timestamp"] = pd.to_datetime(dataframe["timestamp"])
     dataframe = dataframe.sort_values("timestamp").reset_index(drop=True)
 
@@ -74,63 +106,46 @@ def build_features(input_path: str, output_path: str) -> None:
     aqi_series = dataframe["us_aqi"].astype(float)
     dataframe["aqi_lag_1"] = aqi_series.shift(1)
     dataframe["aqi_lag_24"] = aqi_series.shift(24)
+    dataframe["aqi_lag_48"] = aqi_series.shift(48)
+    dataframe["aqi_lag_72"] = aqi_series.shift(72)
     dataframe["aqi_rolling_24"] = aqi_series.rolling(window=24).mean()
     dataframe["pm25_rolling_24"] = dataframe["pm2_5"].rolling(window=24).mean()
     dataframe["pm10_rolling_24"] = dataframe["pm10"].rolling(window=24).mean()
     dataframe["co_rolling_24"] = dataframe["co"].rolling(window=24).mean()
     dataframe["aqi_change_rate"] = aqi_series.pct_change().replace([float("inf"), float("-inf")], pd.NA)
 
-    dataframe = dataframe.dropna().reset_index(drop=True)
+    return dataframe.dropna().reset_index(drop=True)
 
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    dataframe.to_csv(output_path, index=False)
 
-    daily_output_path = Path(output_path).with_name("daily_features.csv")
-    build_daily_features(dataframe).to_csv(daily_output_path, index=False)
+def build_features() -> pd.DataFrame:
+    end_time = int(time.time())
+    start_time = end_time - (2 * 365 * 24 * 60 * 60)
+    raw_data = fetch_historical_aqi_chunks(start_time, end_time)
+    if not raw_data:
+        raise RuntimeError("No OpenWeather data was returned.")
 
-    print("Connecting to Hopsworks Feature Store...")
-    try:
-        import hopsworks
+    dataframe = _build_feature_dataframe(process_raw_data(raw_data))
 
-        project = hopsworks.login()
-        feature_store = project.get_feature_store()
-        print(f"Uploading features to Feature Group '{FEATURE_GROUP_NAME}'...")
-        feature_group = feature_store.get_or_create_feature_group(
-            name=FEATURE_GROUP_NAME,
-            version=FEATURE_GROUP_VERSION,
-            primary_key=["timestamp"],
-            description="AQI dataset with engineered hourly features",
-        )
-        upload_columns = [
-            "timestamp",
-            "aqi",
-            "co",
-            "no",
-            "no2",
-            "o3",
-            "so2",
-            "pm2_5",
-            "pm10",
-            "nh3",
-            "hour",
-            "day_of_week",
-            "month",
-            "is_weekend",
-            "aqi_lag_1",
-            "aqi_lag_24",
-            "aqi_rolling_24",
-        ]
-        upload_df = dataframe[[column for column in upload_columns if column in dataframe.columns]].copy()
-        feature_group.insert(upload_df)
-        print("Successfully uploaded features to Hopsworks!")
-    except Exception as exc:
-        print(f"Skipping Hopsworks upload: {exc}")
+    print("Connecting to MongoDB feature store...")
+    from pymongo import MongoClient
+
+    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=8000)
+    client.admin.command("ping")
+    collection = client[MONGO_DB_NAME][MONGO_FEATURES_COLLECTION]
+    upload_columns = ["timestamp"] + FEATURE_COLUMNS
+    upload_df = dataframe[[column for column in upload_columns if column in dataframe.columns]].copy()
+    records = json.loads(upload_df.to_json(orient="records", date_format="iso"))
+    operations = [ReplaceOne({"timestamp": record["timestamp"]}, record, upsert=True) for record in records]
+    if operations:
+        collection.bulk_write(operations, ordered=False)
+    collection.create_index("timestamp", unique=True)
+    print(f"Successfully upserted {len(records)} feature rows into MongoDB!")
 
     print("Feature Engineering Complete!")
     print(f"Final dataset shape: {dataframe.shape}")
-    print("New features created: us_aqi, lagged AQI, rolling pollutant features, and AQI change rate")
-    print(f"Saved ML-ready data to: {output_path}")
+    print("New features created and stored in the MongoDB feature store.")
+    return dataframe
 
 
 if __name__ == "__main__":
-    build_features("data/raw/historical_aqi.csv", "data/processed/features.csv")
+    build_features()

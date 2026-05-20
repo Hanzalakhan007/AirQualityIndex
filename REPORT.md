@@ -1,6 +1,6 @@
 # Project Update Report
 
-This version of `AirQualityIndex` was upgraded by comparing it against the reference `aqi-predictor-main` project and filling the main gaps without replacing the original Hopsworks workflow.
+This version of `AirQualityIndex` uses MongoDB for the feature store and model registry while preserving the dashboard, API, training, and reporting workflow.
 
 ## Added or improved
 

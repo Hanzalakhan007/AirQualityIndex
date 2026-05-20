@@ -15,5 +15,5 @@ def run_script(script_name: str) -> None:
 
 
 if __name__ == "__main__":
-    for script in ("fetch_raw_data.py", "feature_pipeline.py", "training_pipeline.py"):
+    for script in ("feature_pipeline.py", "training_pipeline.py"):
         run_script(script)

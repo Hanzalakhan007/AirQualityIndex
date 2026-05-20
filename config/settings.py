@@ -34,14 +34,16 @@ DEFAULT_LON = float(os.getenv("AQI_LON", os.getenv("LON", "67.0011")))
 TIMEZONE = os.getenv("AQI_TIMEZONE", "Asia/Karachi")
 
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "")
-HOPSWORKS_API_KEY = os.getenv("HOPSWORKS_API_KEY", "")
-
-FEATURE_GROUP_NAME = os.getenv("HOPSWORKS_FEATURE_GROUP", "aqi_features")
-FEATURE_GROUP_VERSION = int(os.getenv("HOPSWORKS_FEATURE_GROUP_VERSION", "1"))
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "air_quality_index")
+MONGO_FEATURES_COLLECTION = os.getenv("MONGO_FEATURES_COLLECTION", "aqi_features")
+MONGO_MODEL_REGISTRY_COLLECTION = os.getenv("MONGO_MODEL_REGISTRY_COLLECTION", "model_registry")
+MONGO_MODEL_BUCKET = os.getenv("MONGO_MODEL_BUCKET", "model_artifacts")
+MONGO_PIPELINE_CONTROL_COLLECTION = os.getenv("MONGO_PIPELINE_CONTROL_COLLECTION") or "pipeline_control"
 
 USE_OPENMETEO_AQI = os.getenv("USE_OPENMETEO_AQI", "true").lower() in ("true", "1", "yes")
 OPEN_METEO_BASE = "https://api.open-meteo.com/v1"
-OPEN_METEO_AIR_QUALITY = "https://air-quality.api.open-meteo.com/v1/air-quality"
+OPEN_METEO_AIR_QUALITY = "https://air-quality-api.open-meteo.com/v1/air-quality"
 OPENWEATHER_AIR_POLLUTION_HISTORY = "https://api.openweathermap.org/data/2.5/air_pollution/history"
 
 AQI_SCALE_1_5 = os.getenv("AQI_SCALE_1_5", "false").lower() in ("true", "1", "yes")
@@ -54,14 +56,6 @@ MODEL_REGISTRY_NAMES = {
     "Ridge Regression": ("aqi_ridge_model", "ridge_model.pkl", "joblib"),
     "Random Forest": ("aqi_rf_model", "rf_model.pkl", "joblib"),
     "XGBoost": ("aqi_xgboost_model", "xgb_model.pkl", "joblib"),
-    "PyTorch Deep Learning": ("aqi_pytorch_model", "pytorch_model.pth", "pytorch"),
-}
-
-MODEL_REGISTRY_FALLBACK_VERSIONS = {
-    "Ridge Regression": 1,
-    "Random Forest": 1,
-    "XGBoost": 2,
-    "PyTorch Deep Learning": 1,
 }
 
 SCALER_REGISTRY_NAME = "aqi_scaler"

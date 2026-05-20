@@ -29,7 +29,7 @@ pip install -r requirements.txt
 Copy `.env.example` to `.env` and set:
 
 - `OPENWEATHER_API_KEY`
-- `HOPSWORKS_API_KEY` if you want remote feature store/model registry access
+- `MONGO_URI`, `MONGO_DB_NAME`, and the MongoDB collection/bucket names for the feature store and model registry
 - `AQI_CITY`, `AQI_LAT`, `AQI_LON`, `AQI_TIMEZONE` if you want another location
 
 ## 4. Run the pipeline

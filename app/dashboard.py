@@ -256,7 +256,7 @@ def render_insights_tab(leaderboard: list[dict], predictions: list[float], curre
                     <div style="font-size: 1.45rem; font-weight: 700; color: #ffffff; margin: 0.45rem 0;">
                         {best['model']}
                     </div>
-                    <div class="muted-note">Automatically selected from your latest Hopsworks model registry entries.</div>
+                    <div class="muted-note">Automatically selected from your latest MongoDB model registry entries.</div>
                     <div style="margin-top: 0.9rem; color: #dce6f3;">{rows}</div>
                 </div>
                 """,
@@ -451,14 +451,14 @@ def main() -> None:
 
         st.markdown("---")
         st.markdown("### About")
-        st.write("Real-time air quality monitoring and 3-day AQI forecasting for Karachi with automated Hopsworks-backed model delivery.")
+        st.write("Real-time air quality monitoring and 3-day AQI forecasting for Karachi with automated MongoDB-backed model delivery.")
         st.markdown("---")
         st.markdown("### System Status")
         st.info("Active")
         st.markdown("---")
         st.markdown("### Technical Specs")
         st.caption("Forecast horizon: next 3 days")
-        st.caption("Models: Ridge, Random Forest, XGBoost, PyTorch")
+        st.caption("Models: Ridge Regression, Random Forest, XGBoost")
         st.caption(f"Timezone: {TIMEZONE}")
         st.markdown("---")
         st.markdown("### Data Sources")
@@ -474,7 +474,7 @@ def main() -> None:
     leaderboard = forecast["leaderboard"] or get_model_leaderboard()
     best_model = forecast["model_name"] or get_default_model_name()
     history_df = get_recent_daily_history()
-    available_model_names = [str(row["model"]) for row in leaderboard][:4] if leaderboard else []
+    available_model_names = [str(row["model"]) for row in leaderboard][:3] if leaderboard else []
     model_forecasts: dict[str, list[float]] = {}
     for candidate_model in available_model_names:
         try:
@@ -484,7 +484,7 @@ def main() -> None:
             continue
 
     st.title("Air Quality Forecast")
-    st.markdown(f"**{DEFAULT_CITY}** · Real AQI scale (0-500) · Hopsworks-backed automation · Timezone: `{TIMEZONE}`")
+    st.markdown(f"**{DEFAULT_CITY}** · Real AQI scale (0-500) · MongoDB-backed automation · Timezone: `{TIMEZONE}`")
 
     st.markdown(
         f"""
@@ -535,7 +535,7 @@ def main() -> None:
             <div class="insight-box">
                 <div class="metric-title">Performance Signal</div>
                 <div style="font-size: 1.35rem; font-weight: 700; color: #ffffff;">{rmse_text}</div>
-                <div class="muted-note" style="margin-top: 0.5rem;">Model comparison is kept close to the reference project, but still uses your Hopsworks-driven deployment flow.</div>
+                <div class="muted-note" style="margin-top: 0.5rem;">Model comparison is kept close to the reference project, but now uses your MongoDB-driven deployment flow.</div>
             </div>
             """,
             unsafe_allow_html=True,
