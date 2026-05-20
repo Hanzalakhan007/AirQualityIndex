@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from config.settings import (
     MODEL_REGISTRY_NAMES,
+    PROCESSED_DIR,
     MONGO_DB_NAME,
     MONGO_FEATURES_COLLECTION,
     MONGO_MODEL_BUCKET,
@@ -39,18 +40,29 @@ os.makedirs("reports", exist_ok=True)
 print("Starting Machine Learning Pipeline...")
 
 def load_training_data() -> pd.DataFrame:
-    """Load processed features from the MongoDB feature store."""
-    print("Connecting to MongoDB feature store...")
-    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=8000)
-    client.admin.command("ping")
-    collection = client[MONGO_DB_NAME][MONGO_FEATURES_COLLECTION]
-    print(f"Fetching features from collection '{MONGO_DB_NAME}.{MONGO_FEATURES_COLLECTION}'...")
-    rows = list(collection.find({}, {"_id": 0}).sort("timestamp", 1))
-    if not rows:
-        raise RuntimeError("MongoDB feature collection is empty. Run `python scripts/feature_pipeline.py` first.")
-    dataframe = pd.DataFrame(rows)
-    dataframe = dataframe.sort_values("timestamp").reset_index(drop=True)
-    return dataframe
+    """Load processed features from MongoDB, with a local CSV fallback."""
+    try:
+        print("Connecting to MongoDB feature store...")
+        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=8000)
+        client.admin.command("ping")
+        collection = client[MONGO_DB_NAME][MONGO_FEATURES_COLLECTION]
+        print(f"Fetching features from collection '{MONGO_DB_NAME}.{MONGO_FEATURES_COLLECTION}'...")
+        rows = list(collection.find({}, {"_id": 0}).sort("timestamp", 1))
+        if rows:
+            dataframe = pd.DataFrame(rows)
+            return dataframe.sort_values("timestamp").reset_index(drop=True)
+    except Exception as exc:
+        print(f"MongoDB training-data load failed, falling back to local CSV: {exc}")
+
+    local_features = PROCESSED_DIR / "features.csv"
+    if not local_features.exists():
+        raise RuntimeError(
+            "MongoDB feature collection is unavailable and no local fallback feature file was found. "
+            "Run `python scripts/feature_pipeline.py` first."
+        )
+    print(f"Loading training data from local fallback file '{local_features}'...")
+    dataframe = pd.read_csv(local_features)
+    return dataframe.sort_values("timestamp").reset_index(drop=True)
 
 
 def get_target_series(dataframe: pd.DataFrame) -> pd.Series:
@@ -66,14 +78,24 @@ def get_target_series(dataframe: pd.DataFrame) -> pd.Series:
 
 
 def add_forecast_targets(dataframe: pd.DataFrame, target: pd.Series) -> pd.DataFrame:
-    """Build realistic next-day average AQI targets on the same 0-500 scale."""
+    """Build calendar-day AQI targets for today plus the next three days."""
     result = dataframe.copy()
     bounded_target = pd.to_numeric(target, errors="coerce").clip(lower=0, upper=500)
-    for day in range(1, 4):
-        start_offset = (day - 1) * 24 + 1
-        end_offset = day * 24 + 1
-        shifted_hours = [bounded_target.shift(-offset) for offset in range(start_offset, end_offset)]
-        result[f"target_day_{day}"] = pd.concat(shifted_hours, axis=1).mean(axis=1)
+    result["date"] = pd.to_datetime(result["timestamp"]).dt.floor("D")
+    daily_targets = (
+        pd.DataFrame({"date": result["date"], "aqi_target": bounded_target})
+        .groupby("date", as_index=False)["aqi_target"]
+        .mean()
+        .sort_values("date")
+        .reset_index(drop=True)
+    )
+    for day in range(4):
+        daily_targets[f"target_day_{day}"] = daily_targets["aqi_target"].shift(-day)
+    result = result.merge(
+        daily_targets[["date", "target_day_0", "target_day_1", "target_day_2", "target_day_3"]],
+        on="date",
+        how="left",
+    )
     return result
 
 
@@ -87,7 +109,7 @@ dataframe = dataframe.dropna().reset_index(drop=True)
 
 available_features = [column for column in FEATURE_COLUMNS if column in dataframe.columns]
 X = dataframe[available_features].apply(pd.to_numeric, errors="coerce").fillna(0.0)
-y = dataframe[["target_day_1", "target_day_2", "target_day_3"]]
+y = dataframe[["target_day_0", "target_day_1", "target_day_2", "target_day_3"]]
 
 train_size = int(len(dataframe) * 0.8)
 X_train, X_test = X.iloc[:train_size], X.iloc[train_size:]
@@ -99,7 +121,7 @@ X_test_scaled = scaler.transform(X_test)
 
 baseline_preds = np.tile(
     X_test["aqi_rolling_24"].fillna(X_test["aqi"]).to_numpy().reshape(-1, 1),
-    (1, 3),
+    (1, 4),
 )
 
 print("\n[1/3] Training Ridge Regression...")
@@ -133,7 +155,7 @@ xgb_model.fit(X_train_scaled, y_train)
 xgb_preds = xgb_model.predict(X_test_scaled)
 
 print("\n" + "=" * 40)
-print("MODEL EVALUATION RESULTS (Test Set Average across 3 Days)")
+print("MODEL EVALUATION RESULTS (Test Set Average across Today + Next 3 Days)")
 print("=" * 40)
 
 
@@ -207,6 +229,12 @@ pd.DataFrame(
         for model_name, metrics in results.items()
     ]
 ).to_csv("reports/model_metrics.csv", index=False)
+
+joblib.dump(ridge, "models/ridge_model.pkl")
+joblib.dump(rf, "models/rf_model.pkl")
+joblib.dump(xgb_model, "models/xgb_model.pkl")
+joblib.dump(scaler, "models/scaler.pkl")
+print("Saved refreshed local model artifacts in the 'models' folder.")
 
 print("\n" + "=" * 40)
 print("UPLOADING TO MONGODB MODEL REGISTRY")

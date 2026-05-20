@@ -18,7 +18,6 @@ from src.inference import (
     explainability_images,
     get_available_model_names,
     get_available_model_options,
-    get_current_aqi,
     get_default_model_name,
     get_latest_feature_row,
     get_model_leaderboard,
@@ -109,8 +108,8 @@ def inject_styles() -> None:
 
 
 def render_forecast_cards(predictions: list[float], forecast_dates: list[str]) -> None:
-    labels = ["Tomorrow", "Day After", "Next Day"]
-    columns = st.columns(3)
+    labels = ["Today", "Tomorrow", "Day After", "Next 3rd Day"]
+    columns = st.columns(4)
     for index, column in enumerate(columns):
         level, color = aqi_level_and_color(predictions[index])
         with column:
@@ -269,7 +268,7 @@ def render_insights_tab(leaderboard: list[dict], predictions: list[float], curre
     with right:
         alerts = alert_days(predictions)
         avg_prediction = float(np.mean(predictions))
-        trend_text = "Worsening" if current_aqi is not None and predictions[0] > current_aqi else "Stable / Improving"
+        trend_text = "Worsening" if len(predictions) > 1 and predictions[1] > predictions[0] else "Stable / Improving"
         alerts_text = "".join(
             [
                 f"<div style='margin-bottom:0.4rem;'><b>Day {alert['day']}</b>: {alert['aqi']:.1f} AQI ({alert['level']})</div>"
@@ -281,8 +280,8 @@ def render_insights_tab(leaderboard: list[dict], predictions: list[float], curre
             <div class="insight-box">
                 <div class="metric-title">Forecast Analysis</div>
                 <div style="font-size: 1rem; color: #dce6f3; line-height: 1.7;">
-                    <div><b>3-Day Average:</b> {avg_prediction:.1f}</div>
-                    <div><b>3-Day Peak:</b> {max(predictions):.1f}</div>
+                    <div><b>4-Day Average:</b> {avg_prediction:.1f}</div>
+                    <div><b>4-Day Peak:</b> {max(predictions):.1f}</div>
                     <div><b>Trend Signal:</b> {trend_text}</div>
                     <div style="margin-top: 0.75rem;"><b>Alerts:</b></div>
                     {alerts_text}
@@ -351,7 +350,7 @@ def render_data_insights_tab(
             st.markdown(
                 f"""
                 <div class="insight-box">
-                    <div><b>3-Day Average:</b> {forecast_values.mean():.1f}</div>
+                    <div><b>4-Day Average:</b> {forecast_values.mean():.1f}</div>
                     <div><b>Projected Peak:</b> {forecast_values.max():.1f}</div>
                     <div><b>Projected Minimum:</b> {forecast_values.min():.1f}</div>
                     <div><b>Forecast Outlook:</b> {outlook}</div>
@@ -455,13 +454,13 @@ def main() -> None:
 
         st.markdown("---")
         st.markdown("### About")
-        st.write("Real-time air quality monitoring and 3-day AQI forecasting for Karachi with automated MongoDB-backed model delivery.")
+        st.write("Model-driven AQI prediction for today plus the next 3 days for Karachi with automated MongoDB-backed delivery.")
         st.markdown("---")
         st.markdown("### System Status")
         st.info("Active")
         st.markdown("---")
         st.markdown("### Technical Specs")
-        st.caption("Forecast horizon: next 3 days")
+        st.caption("Forecast horizon: today + next 3 days")
         st.caption(f"Models: {', '.join(available_models) if available_models else 'Ridge Regression, Random Forest, XGBoost'}")
         st.caption(f"Timezone: {TIMEZONE}")
         st.markdown("---")
@@ -481,9 +480,9 @@ def main() -> None:
         st.error(f"Unable to generate forecast for the selected model: {exc}")
         st.stop()
     predictions = forecast["predictions"]
+    predicted_today_aqi = forecast["today_aqi"]
     forecast_dates = forecast["forecast_dates"]
-    current_aqi, current_label = get_current_aqi()
-    level, color = aqi_level_and_color(current_aqi)
+    level, color = aqi_level_and_color(predicted_today_aqi)
     leaderboard = forecast["leaderboard"] or get_model_leaderboard()
     best_model = forecast["model_name"] or get_default_model_name()
     history_df = get_recent_daily_history()
@@ -502,10 +501,10 @@ def main() -> None:
     st.markdown(
         f"""
         <div class="hero-card">
-            <div class="hero-label" style="color:{color};">{current_label}</div>
-            <div class="hero-aqi" style="color:{color};">{f"{current_aqi:.1f}" if current_aqi is not None else "—"}</div>
+            <div class="hero-label" style="color:{color};">Model Predicted Today</div>
+            <div class="hero-aqi" style="color:{color};">{f"{predicted_today_aqi:.1f}" if predicted_today_aqi is not None else "—"}</div>
             <div class="hero-label" style="color:{color}; opacity:0.92;">{level}</div>
-            <div style="margin-top: 0.9rem; color: #aeb4be;">Latest record: {format_timestamp(latest_row.get("timestamp"))}</div>
+            <div style="margin-top: 0.9rem; color: #aeb4be;">Feature snapshot: {format_timestamp(latest_row.get("timestamp"))}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -515,17 +514,17 @@ def main() -> None:
         f"""
         <div class="precautions-box" style="border-left-color:{color};">
             <div class="metric-title">Health Guidance</div>
-            <div style="font-size: 1.05rem; color: #e6edf3;">{health_recommendation(current_aqi)}</div>
+            <div style="font-size: 1.05rem; color: #e6edf3;">{health_recommendation(predicted_today_aqi)}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    st.subheader("3-Day Forecast Outlook")
+    st.subheader("4-Day Forecast Outlook")
     render_forecast_cards(predictions, forecast_dates)
 
     st.markdown("---")
-    st.subheader("72-Hour Forecast Trend")
+    st.subheader("96-Hour Forecast Trend")
     render_forecast_chart(predictions)
 
     left, right = st.columns(2)
@@ -535,7 +534,7 @@ def main() -> None:
             <div class="insight-box">
                 <div class="metric-title">Production Model</div>
                 <div style="font-size: 1.35rem; font-weight: 700; color: #ffffff;">{best_model}</div>
-                <div class="muted-note" style="margin-top: 0.5rem;">The dashboard uses the strongest available model from your latest registry metrics unless you override it in the sidebar.</div>
+                <div class="muted-note" style="margin-top: 0.5rem;">The dashboard uses your selected model to predict today's AQI plus the next three days.</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -563,7 +562,7 @@ def main() -> None:
         curve_df = build_forecast_curve(predictions)
         report_df = pd.DataFrame(
             {
-                "Day": ["Tomorrow", "Day After", "Next Day"],
+                "Day": ["Today", "Tomorrow", "Day After", "Next 3rd Day"],
                 "Date": forecast_dates,
                 "Predicted AQI": predictions,
                 "Category": [aqi_level_and_color(value)[0] for value in predictions],
@@ -580,7 +579,7 @@ def main() -> None:
         if not curve_df.empty:
             hourly_export = curve_df.rename(columns={"timestamp": "Forecast Time", "aqi_predicted": "Predicted AQI", "day_label": "Forecast Day"})
             st.download_button(
-                "Download 72-hour curve CSV",
+                "Download 96-hour curve CSV",
                 hourly_export.to_csv(index=False).encode("utf-8"),
                 "aqi_forecast_curve.csv",
                 "text/csv",
@@ -590,13 +589,13 @@ def main() -> None:
         render_history_tab(history_df)
 
     with tab_data:
-        render_data_insights_tab(history_df, leaderboard, current_aqi, predictions, model_forecasts)
+        render_data_insights_tab(history_df, leaderboard, predicted_today_aqi, predictions, model_forecasts)
 
     with tab_health:
-        render_health_guidance_tab(predictions, current_aqi)
+        render_health_guidance_tab(predictions, predicted_today_aqi)
 
     with tab_explain:
-        render_insights_tab(leaderboard, predictions, current_aqi)
+        render_insights_tab(leaderboard, predictions, predicted_today_aqi)
         render_explainability()
 
     st.markdown("---")

@@ -483,7 +483,7 @@ def fetch_openmeteo_snapshot() -> dict[str, Any] | None:
 
 
 def predict_next_days(model_name: str | None = None, overrides: dict[str, float] | None = None) -> dict[str, Any]:
-    """Generate a three-day AQI forecast."""
+    """Generate a four-day AQI forecast for today plus the next three days."""
     metadata = get_model_registry_metadata()
     selected_model = get_default_model_name() if not model_name or model_name == "Best Available" else model_name
     available_models = get_available_model_names()
@@ -506,9 +506,9 @@ def predict_next_days(model_name: str | None = None, overrides: dict[str, float]
 
     raw_prediction = np.ravel(model.predict(scaled_input))
 
-    predictions = [calibrate_aqi(max(1.0, float(value))) or 0.0 for value in raw_prediction[:3]]
+    predictions = [calibrate_aqi(max(1.0, float(value))) or 0.0 for value in raw_prediction[:4]]
     now_local = datetime.now(ZoneInfo(TIMEZONE))
-    forecast_dates = [(now_local + timedelta(days=index + 1)).strftime("%b %d") for index in range(3)]
+    forecast_dates = [(now_local + timedelta(days=index)).strftime("%b %d") for index in range(4)]
 
     return {
         "city": DEFAULT_CITY,
@@ -516,6 +516,7 @@ def predict_next_days(model_name: str | None = None, overrides: dict[str, float]
         "latest_row": latest_row,
         "input_frame": aligned_input,
         "predictions": predictions,
+        "today_aqi": predictions[0] if predictions else None,
         "forecast_dates": forecast_dates,
         "model_metrics": metadata.get(selected_model, {}).get("metrics", {}),
         "leaderboard": get_model_leaderboard(),
@@ -560,17 +561,17 @@ def get_recent_daily_history(days: int = 14) -> pd.DataFrame:
 
 
 def build_forecast_curve(predictions: list[float]) -> pd.DataFrame:
-    """Create a simple hourly forecast curve for the next 72 hours."""
+    """Create a simple hourly forecast curve for today plus the next three days."""
     start = datetime.now(ZoneInfo(TIMEZONE)).replace(minute=0, second=0, microsecond=0)
     rows = []
-    for day_index, prediction in enumerate(predictions, start=1):
+    for day_index, prediction in enumerate(predictions):
         day_start = start + timedelta(days=day_index)
         for hour in range(24):
             rows.append(
                 {
                     "timestamp": day_start + timedelta(hours=hour),
                     "aqi_predicted": prediction,
-                    "day_label": f"Day {day_index}",
+                    "day_label": f"Day {day_index + 1}",
                 }
             )
     dataframe = pd.DataFrame(rows)
