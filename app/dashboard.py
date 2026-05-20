@@ -18,6 +18,7 @@ from src.inference import (
     explainability_images,
     get_available_model_names,
     get_available_model_options,
+    get_backend_status,
     get_default_model_name,
     get_latest_feature_row,
     get_model_leaderboard,
@@ -420,6 +421,7 @@ def main() -> None:
 
     available_models = get_available_model_names()
     model_options = get_available_model_options()
+    backend_status = get_backend_status()
 
     with st.sidebar:
         st.header("Forecast Controls")
@@ -457,7 +459,12 @@ def main() -> None:
         st.write("Model-driven AQI prediction for today plus the next 3 days for Karachi with automated MongoDB-backed delivery.")
         st.markdown("---")
         st.markdown("### System Status")
-        st.info("Active")
+        if backend_status["mongo_available"]:
+            st.success("MongoDB connected")
+        else:
+            st.warning("MongoDB unavailable, using local fallback data")
+            if backend_status.get("local_feature_timestamp"):
+                st.caption(f"Fallback timestamp: {format_timestamp(backend_status['local_feature_timestamp'])}")
         st.markdown("---")
         st.markdown("### Technical Specs")
         st.caption("Forecast horizon: today + next 3 days")
@@ -497,6 +504,10 @@ def main() -> None:
 
     st.title("Air Quality Forecast")
     st.markdown(f"**{DEFAULT_CITY}** · Real AQI scale (0-500) · MongoDB-backed automation · Timezone: `{TIMEZONE}`")
+    if not backend_status["mongo_available"]:
+        fallback_note = backend_status.get("local_feature_timestamp")
+        fallback_text = f" Latest local feature timestamp: {format_timestamp(fallback_note)}." if fallback_note else ""
+        st.warning(f"MongoDB is currently unavailable, so the dashboard is using refreshed local fallback data.{fallback_text}")
 
     st.markdown(
         f"""

@@ -63,6 +63,7 @@ def clear_caches() -> None:
     load_models.cache_clear()
     get_model_registry_metadata.cache_clear()
     get_mongo_database.cache_clear()
+    get_backend_status.cache_clear()
 
 
 def normalize_aqi_value(value: float | None, pm25: float | None = None) -> float | None:
@@ -262,6 +263,39 @@ def get_available_model_options() -> list[str]:
     if not available_models:
         return MODEL_OPTIONS
     return ["Best Available"] + available_models
+
+
+@lru_cache(maxsize=1)
+def get_backend_status() -> dict[str, Any]:
+    """Report whether MongoDB is available and which fallback data source is active."""
+    status: dict[str, Any] = {
+        "mongo_available": False,
+        "mongo_error": None,
+        "feature_source": "local_fallback",
+        "local_feature_file": str(LOCAL_FEATURES_FILE),
+        "local_feature_timestamp": None,
+    }
+
+    if LOCAL_FEATURES_FILE.exists():
+        try:
+            local_df = pd.read_csv(LOCAL_FEATURES_FILE, usecols=["timestamp"])
+            if not local_df.empty:
+                status["local_feature_timestamp"] = str(pd.to_datetime(local_df["timestamp"]).max())
+        except Exception:
+            pass
+
+    try:
+        database = get_mongo_database()
+        collection = database[MONGO_FEATURES_COLLECTION]
+        latest_row = collection.find_one({}, {"timestamp": 1, "_id": 0}, sort=[("timestamp", -1)])
+        status["mongo_available"] = True
+        status["feature_source"] = "mongodb"
+        if latest_row and latest_row.get("timestamp") is not None:
+            status["mongo_feature_timestamp"] = str(latest_row["timestamp"])
+    except Exception as exc:
+        status["mongo_error"] = str(exc)
+
+    return status
 
 
 def _model_metrics_value(metrics: dict[str, Any], metric_name: str, default: float) -> float:

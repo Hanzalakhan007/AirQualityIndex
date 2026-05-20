@@ -12,11 +12,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from config.settings import (
     DEFAULT_LAT,
     DEFAULT_LON,
+    PROCESSED_DIR,
+    RAW_DIR,
     MONGO_DB_NAME,
     MONGO_FEATURES_COLLECTION,
     MONGO_URI,
 )
-from src.data_collection.fetch_data import fetch_historical_aqi, fetch_openmeteo_historical_aqi, process_raw_data
+from src.data_collection.fetch_data import (
+    fetch_historical_aqi,
+    fetch_openmeteo_historical_aqi,
+    process_and_save_data,
+    process_raw_data,
+)
 from src.schema import FEATURE_COLUMNS
 
 load_dotenv()
@@ -117,6 +124,21 @@ def _build_feature_dataframe(dataframe: pd.DataFrame) -> pd.DataFrame:
     return dataframe.dropna().reset_index(drop=True)
 
 
+def save_local_feature_artifacts(dataframe: pd.DataFrame, raw_data: list[dict]) -> None:
+    """Refresh the local fallback datasets used when MongoDB is unavailable."""
+    raw_output = RAW_DIR / "historical_aqi.csv"
+    process_and_save_data(raw_data, str(raw_output))
+
+    features_output = PROCESSED_DIR / "features.csv"
+    dataframe.to_csv(features_output, index=False)
+    print(f"Saved refreshed feature fallback to '{features_output}'.")
+
+    daily_output = PROCESSED_DIR / "daily_features.csv"
+    daily_dataframe = build_daily_features(dataframe)
+    daily_dataframe.to_csv(daily_output, index=False)
+    print(f"Saved refreshed daily fallback to '{daily_output}'.")
+
+
 def build_features() -> pd.DataFrame:
     end_time = int(time.time())
     start_time = end_time - (2 * 365 * 24 * 60 * 60)
@@ -125,25 +147,34 @@ def build_features() -> pd.DataFrame:
         raise RuntimeError("No OpenWeather data was returned.")
 
     dataframe = _build_feature_dataframe(process_raw_data(raw_data))
+    save_local_feature_artifacts(dataframe, raw_data)
 
-    print("Connecting to MongoDB feature store...")
-    from pymongo import MongoClient
+    mongo_synced = False
+    try:
+        print("Connecting to MongoDB feature store...")
+        from pymongo import MongoClient
 
-    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=8000)
-    client.admin.command("ping")
-    collection = client[MONGO_DB_NAME][MONGO_FEATURES_COLLECTION]
-    upload_columns = ["timestamp"] + FEATURE_COLUMNS
-    upload_df = dataframe[[column for column in upload_columns if column in dataframe.columns]].copy()
-    records = json.loads(upload_df.to_json(orient="records", date_format="iso"))
-    operations = [ReplaceOne({"timestamp": record["timestamp"]}, record, upsert=True) for record in records]
-    if operations:
-        collection.bulk_write(operations, ordered=False)
-    collection.create_index("timestamp", unique=True)
-    print(f"Successfully upserted {len(records)} feature rows into MongoDB!")
+        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=8000)
+        client.admin.command("ping")
+        collection = client[MONGO_DB_NAME][MONGO_FEATURES_COLLECTION]
+        upload_columns = ["timestamp"] + FEATURE_COLUMNS
+        upload_df = dataframe[[column for column in upload_columns if column in dataframe.columns]].copy()
+        records = json.loads(upload_df.to_json(orient="records", date_format="iso"))
+        operations = [ReplaceOne({"timestamp": record["timestamp"]}, record, upsert=True) for record in records]
+        if operations:
+            collection.bulk_write(operations, ordered=False)
+        collection.create_index("timestamp", unique=True)
+        print(f"Successfully upserted {len(records)} feature rows into MongoDB!")
+        mongo_synced = True
+    except Exception as exc:
+        print(f"MongoDB sync failed. Local fallback files were refreshed successfully: {exc}")
 
     print("Feature Engineering Complete!")
     print(f"Final dataset shape: {dataframe.shape}")
-    print("New features created and stored in the MongoDB feature store.")
+    if mongo_synced:
+        print("New features created and stored in both the local fallback files and MongoDB.")
+    else:
+        print("New features created and stored in the local fallback files only.")
     return dataframe
 
 
