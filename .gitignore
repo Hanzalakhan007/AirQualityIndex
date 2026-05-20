@@ -10,8 +10,9 @@ __pycache__/
 *$py.class
 
 # Model and training artifacts
-models/*.pkl
-models/*.pth
+models/*
+!models/ridge_model.pkl
+!models/scaler.pkl
 reports/*.png
 reports/*.csv
 reports/explainability/*.png
