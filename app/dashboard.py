@@ -10,13 +10,14 @@ import streamlit as st
 
 from config.settings import DEFAULT_CITY, TIMEZONE
 from src.inference import (
-    MODEL_OPTIONS,
     SLIDER_FEATURES,
     alert_days,
     aqi_level_and_color,
     build_forecast_curve,
     clear_caches,
     explainability_images,
+    get_available_model_names,
+    get_available_model_options,
     get_current_aqi,
     get_default_model_name,
     get_latest_feature_row,
@@ -418,9 +419,12 @@ def main() -> None:
         st.error(f"Unable to load feature data: {exc}")
         st.stop()
 
+    available_models = get_available_model_names()
+    model_options = get_available_model_options()
+
     with st.sidebar:
         st.header("Forecast Controls")
-        model_name = st.selectbox("Model Strategy", MODEL_OPTIONS, index=0)
+        model_name = st.selectbox("Model Strategy", model_options, index=0)
         if st.button("Generate Forecast", use_container_width=True):
             clear_caches()
             st.rerun()
@@ -458,15 +462,24 @@ def main() -> None:
         st.markdown("---")
         st.markdown("### Technical Specs")
         st.caption("Forecast horizon: next 3 days")
-        st.caption("Models: Ridge Regression, Random Forest, XGBoost")
+        st.caption(f"Models: {', '.join(available_models) if available_models else 'Ridge Regression, Random Forest, XGBoost'}")
         st.caption(f"Timezone: {TIMEZONE}")
         st.markdown("---")
         st.markdown("### Data Sources")
         st.caption("Primary history: OpenWeather Air Pollution API")
         st.caption("Live fallback snapshot: Open-Meteo Air Quality API")
+        if available_models and len(available_models) < 3:
+            st.warning(
+                "Some models are hidden because they are not available in the current deployment. "
+                f"Available now: {', '.join(available_models)}."
+            )
 
     selected_model = None if model_name == "Best Available" else model_name
-    forecast = predict_next_days(selected_model, overrides)
+    try:
+        forecast = predict_next_days(selected_model, overrides)
+    except Exception as exc:
+        st.error(f"Unable to generate forecast for the selected model: {exc}")
+        st.stop()
     predictions = forecast["predictions"]
     forecast_dates = forecast["forecast_dates"]
     current_aqi, current_label = get_current_aqi()

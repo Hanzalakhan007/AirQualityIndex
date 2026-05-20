@@ -243,6 +243,27 @@ def _load_local_models(requested_models: tuple[str, ...] | None = None) -> tuple
     return models, scaler, metadata
 
 
+@lru_cache(maxsize=1)
+def get_available_model_names() -> list[str]:
+    """Return only the models that can actually be loaded right now."""
+    try:
+        models, scaler, _ = load_models()
+        if scaler is None:
+            return []
+        return [label for label in MODEL_REGISTRY_NAMES if label in models]
+    except Exception:
+        if not LOCAL_SCALER_FILE.exists():
+            return []
+        return [label for label in MODEL_REGISTRY_NAMES if LOCAL_MODEL_FILES.get(label, Path("")).exists()]
+
+
+def get_available_model_options() -> list[str]:
+    available_models = get_available_model_names()
+    if not available_models:
+        return MODEL_OPTIONS
+    return ["Best Available"] + available_models
+
+
 def _model_metrics_value(metrics: dict[str, Any], metric_name: str, default: float) -> float:
     try:
         return float(metrics.get(metric_name, default))
@@ -351,9 +372,12 @@ def load_models(requested_models: tuple[str, ...] | None = None) -> tuple[dict[s
 def get_model_leaderboard() -> list[dict[str, Any]]:
     """Return model-registry metrics sorted by best validation performance."""
     metadata = get_model_registry_metadata()
+    available_models = set(get_available_model_names())
     leaderboard = []
 
     for label, info in metadata.items():
+        if available_models and label not in available_models:
+            continue
         metrics = info.get("metrics", {}) or {}
         rmse = _model_metrics_value(metrics, "rmse", 999999.0)
         mae = _model_metrics_value(metrics, "mae", 999999.0)
@@ -462,6 +486,12 @@ def predict_next_days(model_name: str | None = None, overrides: dict[str, float]
     """Generate a three-day AQI forecast."""
     metadata = get_model_registry_metadata()
     selected_model = get_default_model_name() if not model_name or model_name == "Best Available" else model_name
+    available_models = get_available_model_names()
+    if available_models and selected_model not in available_models:
+        raise RuntimeError(
+            f"Model '{selected_model}' is not available in the current deployment. "
+            f"Available models: {', '.join(available_models)}."
+        )
     models, scaler, _ = load_models((selected_model,))
     if scaler is None:
         raise RuntimeError("Scaler could not be loaded from MongoDB model registry.")
