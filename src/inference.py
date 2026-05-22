@@ -12,13 +12,7 @@ import numpy as np
 import pandas as pd
 import requests
 from gridfs import GridFSBucket
-from pymongo import MongoClient
 from zoneinfo import ZoneInfo
-
-try:
-    import certifi
-except ImportError:  # pragma: no cover - optional dependency
-    certifi = None
 
 from config.settings import (
     AQI_CALIBRATION_ENABLED,
@@ -35,7 +29,6 @@ from config.settings import (
     MONGO_FEATURES_COLLECTION,
     MONGO_MODEL_BUCKET,
     MONGO_MODEL_REGISTRY_COLLECTION,
-    MONGO_URI,
     OPEN_METEO_AIR_QUALITY,
     PROCESSED_DIR,
     REPORTS_DIR,
@@ -43,6 +36,7 @@ from config.settings import (
     SCALER_REGISTRY_NAME,
     TIMEZONE,
 )
+from src.mongo import create_verified_mongo_client
 from src.schema import FEATURE_COLUMNS
 
 MODEL_OPTIONS = ["Best Available"] + list(MODEL_REGISTRY_NAMES.keys())
@@ -62,6 +56,7 @@ def clear_caches() -> None:
     load_feature_data.cache_clear()
     load_models.cache_clear()
     get_model_registry_metadata.cache_clear()
+    get_mongo_database_state.cache_clear()
     get_mongo_database.cache_clear()
     get_backend_status.cache_clear()
 
@@ -135,20 +130,20 @@ def health_recommendation(aqi: float | None) -> str:
 
 
 @lru_cache(maxsize=1)
-def get_mongo_database():
-    client_kwargs = {
-        "serverSelectionTimeoutMS": 8000,
-        "socketTimeoutMS": 20000,
-        "connectTimeoutMS": 20000,
-    }
-    if certifi is not None:
-        client_kwargs["tlsCAFile"] = certifi.where()
+def get_mongo_database_state() -> tuple[Any | None, str | None]:
     try:
-        client = MongoClient(MONGO_URI, **client_kwargs)
-        client.admin.command("ping")
+        client = create_verified_mongo_client()
     except Exception as exc:
-        raise RuntimeError(f"Unable to connect to MongoDB: {exc}") from exc
-    return client[MONGO_DB_NAME]
+        return None, str(exc)
+    return client[MONGO_DB_NAME], None
+
+
+@lru_cache(maxsize=1)
+def get_mongo_database():
+    database, error = get_mongo_database_state()
+    if database is None:
+        raise RuntimeError(f"Unable to connect to MongoDB: {error}")
+    return database
 
 
 def _latest_registry_document(registry_name: str) -> dict[str, Any] | None:
@@ -584,12 +579,12 @@ def get_recent_daily_history(days: int = 14) -> pd.DataFrame:
         axis=1,
     )
     history = (
-        dataframe.set_index("timestamp")["aqi_display"]
+        dataframe.set_index("timestamp")[["aqi_display", "pm2_5", "pm10"]]
         .resample("D")
         .mean()
         .tail(days)
         .reset_index()
-        .rename(columns={"timestamp": "date", "aqi_display": "aqi_display"})
+        .rename(columns={"timestamp": "date"})
     )
     return history
 

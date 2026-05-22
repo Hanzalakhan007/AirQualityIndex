@@ -40,6 +40,10 @@ MONGO_FEATURES_COLLECTION = os.getenv("MONGO_FEATURES_COLLECTION", "aqi_features
 MONGO_MODEL_REGISTRY_COLLECTION = os.getenv("MONGO_MODEL_REGISTRY_COLLECTION", "model_registry")
 MONGO_MODEL_BUCKET = os.getenv("MONGO_MODEL_BUCKET", "model_artifacts")
 MONGO_PIPELINE_CONTROL_COLLECTION = os.getenv("MONGO_PIPELINE_CONTROL_COLLECTION") or "pipeline_control"
+MONGO_ENABLED = os.getenv("MONGO_ENABLED", "true").lower() in ("true", "1", "yes")
+MONGO_SERVER_SELECTION_TIMEOUT_MS = int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "3000"))
+MONGO_SOCKET_TIMEOUT_MS = int(os.getenv("MONGO_SOCKET_TIMEOUT_MS", "8000"))
+MONGO_CONNECT_TIMEOUT_MS = int(os.getenv("MONGO_CONNECT_TIMEOUT_MS", "8000"))
 
 USE_OPENMETEO_AQI = os.getenv("USE_OPENMETEO_AQI", "true").lower() in ("true", "1", "yes")
 OPEN_METEO_BASE = "https://api.open-meteo.com/v1"

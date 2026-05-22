@@ -9,7 +9,6 @@ import joblib
 import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
-from pymongo import MongoClient
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
@@ -26,10 +25,10 @@ from config.settings import (
     MONGO_FEATURES_COLLECTION,
     MONGO_MODEL_BUCKET,
     MONGO_MODEL_REGISTRY_COLLECTION,
-    MONGO_URI,
     SCALER_REGISTRY_FILENAME,
     SCALER_REGISTRY_NAME,
 )
+from src.mongo import create_verified_mongo_client
 from src.schema import FEATURE_COLUMNS
 
 load_dotenv()
@@ -43,8 +42,7 @@ def load_training_data() -> pd.DataFrame:
     """Load processed features from MongoDB, with a local CSV fallback."""
     try:
         print("Connecting to MongoDB feature store...")
-        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=8000)
-        client.admin.command("ping")
+        client = create_verified_mongo_client()
         collection = client[MONGO_DB_NAME][MONGO_FEATURES_COLLECTION]
         print(f"Fetching features from collection '{MONGO_DB_NAME}.{MONGO_FEATURES_COLLECTION}'...")
         rows = list(collection.find({}, {"_id": 0}).sort("timestamp", 1))
@@ -261,8 +259,7 @@ def save_registry_artifact(
     metrics: dict[str, float | str | int],
     label: str | None = None,
 ) -> None:
-    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=8000)
-    client.admin.command("ping")
+    client = create_verified_mongo_client()
     database = client[MONGO_DB_NAME]
     registry = database[MONGO_MODEL_REGISTRY_COLLECTION]
     bucket = GridFSBucket(database, bucket_name=MONGO_MODEL_BUCKET)

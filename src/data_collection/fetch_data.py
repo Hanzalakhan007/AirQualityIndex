@@ -16,6 +16,7 @@ from config.settings import (
     OPEN_METEO_AIR_QUALITY,
     OPENWEATHER_AIR_POLLUTION_HISTORY,
     OPENWEATHER_API_KEY,
+    RAW_DIR,
     TIMEZONE,
 )
 
@@ -187,7 +188,14 @@ if __name__ == "__main__":
     else:
         end_time = int(time.time())
         start_time = end_time - (2 * 365 * 24 * 60 * 60)
-        api_data = fetch_historical_aqi(DEFAULT_LAT, DEFAULT_LON, start_time, end_time)
-        if api_data:
-            dataframe = process_raw_data(api_data)
-            print(f"Fetched {len(dataframe)} rows from OpenWeather.")
+        raw_data = fetch_historical_aqi(DEFAULT_LAT, DEFAULT_LON, start_time, end_time)
+        if not raw_data:
+            print("OpenWeather returned no historical rows; trying Open-Meteo fallback.")
+            raw_data = fetch_openmeteo_historical_aqi(DEFAULT_LAT, DEFAULT_LON, start_time, end_time)
+        if raw_data:
+            output_path = RAW_DIR / "historical_aqi.csv"
+            process_and_save_data(raw_data, str(output_path))
+            dataframe = process_raw_data(raw_data)
+            print(f"Prepared {len(dataframe)} raw AQI rows.")
+        else:
+            print("No historical AQI data was fetched from either provider.")

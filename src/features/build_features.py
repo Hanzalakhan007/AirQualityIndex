@@ -12,11 +12,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from config.settings import (
     DEFAULT_LAT,
     DEFAULT_LON,
-    PROCESSED_DIR,
-    RAW_DIR,
     MONGO_DB_NAME,
     MONGO_FEATURES_COLLECTION,
-    MONGO_URI,
+    PROCESSED_DIR,
+    RAW_DIR,
 )
 from src.data_collection.fetch_data import (
     fetch_historical_aqi,
@@ -24,6 +23,7 @@ from src.data_collection.fetch_data import (
     process_and_save_data,
     process_raw_data,
 )
+from src.mongo import create_verified_mongo_client
 from src.schema import FEATURE_COLUMNS
 
 load_dotenv()
@@ -152,10 +152,7 @@ def build_features() -> pd.DataFrame:
     mongo_synced = False
     try:
         print("Connecting to MongoDB feature store...")
-        from pymongo import MongoClient
-
-        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=8000)
-        client.admin.command("ping")
+        client = create_verified_mongo_client()
         collection = client[MONGO_DB_NAME][MONGO_FEATURES_COLLECTION]
         upload_columns = ["timestamp"] + FEATURE_COLUMNS
         upload_df = dataframe[[column for column in upload_columns if column in dataframe.columns]].copy()

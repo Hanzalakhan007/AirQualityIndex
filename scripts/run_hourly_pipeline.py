@@ -7,13 +7,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-try:
-    import certifi
-except ImportError:  # pragma: no cover - optional dependency
-    certifi = None
-
 from dotenv import load_dotenv
-from pymongo import MongoClient
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -25,23 +19,10 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from config.settings import (  # noqa: E402
     MONGO_DB_NAME,
     MONGO_PIPELINE_CONTROL_COLLECTION,
-    MONGO_URI,
 )
+from src.mongo import create_verified_mongo_client  # noqa: E402
 
 load_dotenv()
-
-
-def get_mongo_client() -> MongoClient:
-    kwargs = {
-        "serverSelectionTimeoutMS": 8000,
-        "socketTimeoutMS": 20000,
-        "connectTimeoutMS": 20000,
-    }
-    if certifi is not None:
-        kwargs["tlsCAFile"] = certifi.where()
-    client = MongoClient(MONGO_URI, **kwargs)
-    client.admin.command("ping")
-    return client
 
 
 def claim_hourly_slot(force_run: bool) -> tuple[bool, datetime]:
@@ -49,7 +30,7 @@ def claim_hourly_slot(force_run: bool) -> tuple[bool, datetime]:
     if force_run:
         return True, slot_start
 
-    client = get_mongo_client()
+    client = create_verified_mongo_client()
     collection = client[MONGO_DB_NAME][MONGO_PIPELINE_CONTROL_COLLECTION]
     now = datetime.now(timezone.utc)
     collection.update_one(
@@ -78,7 +59,7 @@ def claim_hourly_slot(force_run: bool) -> tuple[bool, datetime]:
 
 
 def mark_pipeline_status(status: str, slot_start: datetime, error_message: str | None = None) -> None:
-    client = get_mongo_client()
+    client = create_verified_mongo_client()
     collection = client[MONGO_DB_NAME][MONGO_PIPELINE_CONTROL_COLLECTION]
     update = {
         "status": status,

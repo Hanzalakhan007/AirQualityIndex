@@ -152,7 +152,7 @@ def render_forecast_chart(predictions: list[float]) -> None:
         xaxis_title="Time",
         yaxis_title="AQI",
     )
-    st.plotly_chart(figure, use_container_width=True)
+    st.plotly_chart(figure, width="stretch")
 
 
 def render_model_comparison_chart(model_forecasts: dict[str, list[float]]) -> None:
@@ -186,7 +186,7 @@ def render_model_comparison_chart(model_forecasts: dict[str, list[float]]) -> No
         yaxis_title="AQI",
         legend_title_text="Model",
     )
-    st.plotly_chart(figure, use_container_width=True)
+    st.plotly_chart(figure, width="stretch")
 
 
 def render_history_tab(history_df: pd.DataFrame) -> None:
@@ -215,7 +215,7 @@ def render_history_tab(history_df: pd.DataFrame) -> None:
         xaxis_title="Date",
         yaxis_title="AQI",
     )
-    st.plotly_chart(figure, use_container_width=True)
+    st.plotly_chart(figure, width="stretch")
 
     cols = st.columns(4)
     stats = [
@@ -300,14 +300,14 @@ def render_explainability() -> None:
     with left:
         st.markdown("### Global Feature Importance")
         if "shap_summary_bar" in images:
-            st.image(str(images["shap_summary_bar"]), use_container_width=True)
+            st.image(str(images["shap_summary_bar"]), width="stretch")
         else:
             st.info("Run `python src/models/explain_model.py` to generate the SHAP summary plot.")
 
     with right:
         st.markdown("### Feature Impact Direction")
         if "shap_impact" in images:
-            st.image(str(images["shap_impact"]), use_container_width=True)
+            st.image(str(images["shap_impact"]), width="stretch")
         else:
             st.info("Run `python src/models/explain_model.py` to generate the SHAP impact plot.")
 
@@ -374,7 +374,7 @@ def render_data_insights_tab(
                 for index, row in enumerate(leaderboard)
             ]
         )
-        st.dataframe(benchmark_df, use_container_width=True, hide_index=True)
+        st.dataframe(benchmark_df, width="stretch", hide_index=True)
     else:
         st.info("Benchmark metrics are not available yet.")
 
@@ -426,10 +426,10 @@ def main() -> None:
     with st.sidebar:
         st.header("Forecast Controls")
         model_name = st.selectbox("Model Strategy", model_options, index=0)
-        if st.button("Generate Forecast", use_container_width=True):
+        if st.button("Generate Forecast", width="stretch"):
             clear_caches()
             st.rerun()
-        if st.button("Reload cached data", use_container_width=True):
+        if st.button("Reload cached data", width="stretch"):
             clear_caches()
             st.rerun()
 
@@ -580,7 +580,7 @@ def main() -> None:
                 "Health Recommendation": [health_recommendation(value) for value in predictions],
             }
         )
-        st.dataframe(report_df, use_container_width=True, hide_index=True)
+        st.dataframe(report_df, width="stretch", hide_index=True)
         st.download_button(
             "Download forecast CSV",
             report_df.to_csv(index=False).encode("utf-8"),
