@@ -434,11 +434,12 @@ def add_aqi_band_shapes() -> list[dict[str, object]]:
 
 
 def render_sidebar_panel(title: str, icon: str, body: str) -> None:
+    heading = f"{icon} {title}".strip()
     st.markdown(
         f"""
         <div class="sidebar-panel">
             <div style="font-family:'Space Grotesk',sans-serif; font-size:1.08rem; font-weight:700; margin-bottom:0.5rem;">
-                {icon} {title}
+                {heading}
             </div>
             <div class="panel-copy" style="font-size:0.95rem;">{body}</div>
         </div>
@@ -691,8 +692,8 @@ def main() -> None:
             <div style="margin-top:0.25rem; margin-bottom:1rem;">
                 <div class="eyebrow">AQI Forecast Studio</div>
                 <div style="font-family:'Space Grotesk',sans-serif; font-size:2rem; font-weight:700; line-height:1.04; margin-top:0.4rem;">
-                    Air Quality
-                    <div style="color:#7dd8ff;">Karachi Intelligence</div>
+                    Karachi AQI
+                    <div style="color:#7dd8ff;">Forecast Studio</div>
                 </div>
             </div>
             """,
@@ -701,7 +702,7 @@ def main() -> None:
 
         render_sidebar_panel(
             "About",
-            "Sun",
+            "",
             "Real-time Karachi air-quality monitoring and next 3 days forecasting powered by a production-ready ensemble of ML models.",
         )
 
