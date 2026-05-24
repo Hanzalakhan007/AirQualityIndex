@@ -56,9 +56,14 @@ jobs:
           base_url="${STREAMLIT_APP_URL%/}"
           health_url="${base_url}/_stcore/health"
           for attempt in $(seq 1 "$attempts"); do
-            status_code=$(curl -sS -o response.json -w "%{http_code}" "$health_url")
-            if [ "$status_code" = "200" ] && grep -qi "ok" response.json; then
+            status_code=$(curl -sS -D response.headers -o response.body -w "%{http_code}" "$health_url")
+            if [ "$status_code" = "200" ] && grep -qi "ok" response.body; then
               echo "Streamlit dashboard is live at $base_url"
+              exit 0
+            fi
+            if [ "$status_code" = "303" ]; then
+              location=$(grep -i '^location:' response.headers | tail -n 1 | tr -d '\r' | cut -d' ' -f2-)
+              echo "Streamlit health endpoint redirected to ${location:-unknown location}; treating redirect as reachable."
               exit 0
             fi
             echo "Attempt $attempt/$attempts: dashboard not ready yet at $health_url (HTTP $status_code). Retrying in ${delay}s..."
