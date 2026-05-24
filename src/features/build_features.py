@@ -20,8 +20,6 @@ from config.settings import (
 from src.data_collection.fetch_data import (
     fetch_historical_aqi,
     fetch_openmeteo_historical_aqi,
-    fetch_openmeteo_historical_weather,
-    merge_air_quality_and_weather_rows,
     process_and_save_data,
     process_raw_data,
 )
@@ -47,10 +45,8 @@ def fetch_historical_aqi_chunks(start_time: int, end_time: int, chunk_days: int 
             chunk = fetch_openmeteo_historical_aqi(DEFAULT_LAT, DEFAULT_LON, current_start, current_end)
             source = "Open-Meteo"
         if chunk:
-            weather_rows = fetch_openmeteo_historical_weather(DEFAULT_LAT, DEFAULT_LON, current_start, current_end)
-            chunk = merge_air_quality_and_weather_rows(chunk, weather_rows)
             rows.extend(chunk)
-            print(f"Fetched and enriched {len(chunk)} {source} rows; running total: {len(rows)}")
+            print(f"Fetched {len(chunk)} {source} rows; running total: {len(rows)}")
         else:
             print(f"No data returned for chunk {current_start} -> {current_end}")
         current_start = current_end + 1
@@ -74,11 +70,6 @@ def build_daily_features(hourly_df: pd.DataFrame) -> pd.DataFrame:
             no2=("no2", "mean"),
             o3=("o3", "mean"),
             aqi=("aqi", "mean"),
-            temperature_2m=("temperature_2m", "mean"),
-            relative_humidity_2m=("relative_humidity_2m", "mean"),
-            wind_speed_10m=("wind_speed_10m", "mean"),
-            surface_pressure=("surface_pressure", "mean"),
-            rainfall=("rainfall", "sum"),
         )
     )
     grouped["date"] = pd.to_datetime(grouped["date"])
@@ -113,18 +104,6 @@ def _build_feature_dataframe(dataframe: pd.DataFrame) -> pd.DataFrame:
 
     dataframe["aqi_raw"] = dataframe["aqi"].astype(float)
     dataframe["aqi"] = dataframe["us_aqi"].astype(float)
-
-    weather_defaults = {
-        "temperature_2m": 0.0,
-        "relative_humidity_2m": 0.0,
-        "wind_speed_10m": 0.0,
-        "surface_pressure": 0.0,
-        "rainfall": 0.0,
-    }
-    for column, default in weather_defaults.items():
-        if column not in dataframe.columns:
-            dataframe[column] = default
-        dataframe[column] = pd.to_numeric(dataframe[column], errors="coerce").fillna(default)
 
     dataframe["hour"] = dataframe["timestamp"].dt.hour
     dataframe["day_of_week"] = dataframe["timestamp"].dt.dayofweek

@@ -49,7 +49,6 @@ MONGO_CONNECT_TIMEOUT_MS = int(os.getenv("MONGO_CONNECT_TIMEOUT_MS", "8000"))
 USE_OPENMETEO_AQI = os.getenv("USE_OPENMETEO_AQI", "true").lower() in ("true", "1", "yes")
 OPEN_METEO_BASE = "https://api.open-meteo.com/v1"
 OPEN_METEO_AIR_QUALITY = "https://air-quality-api.open-meteo.com/v1/air-quality"
-OPEN_METEO_HISTORICAL_WEATHER = "https://archive-api.open-meteo.com/v1/archive"
 OPENWEATHER_AIR_POLLUTION_HISTORY = "https://api.openweathermap.org/data/2.5/air_pollution/history"
 
 AQI_SCALE_1_5 = os.getenv("AQI_SCALE_1_5", "false").lower() in ("true", "1", "yes")

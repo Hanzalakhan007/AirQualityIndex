@@ -509,13 +509,6 @@ def build_input_frame(latest_row: pd.Series, overrides: dict[str, float] | None 
         "pm2_5": float(overrides.get("pm2_5", latest_row.get("pm2_5", 0.0))),
         "pm10": float(overrides.get("pm10", latest_row.get("pm10", 0.0))),
         "nh3": float(overrides.get("nh3", latest_row.get("nh3", 0.0))),
-        "temperature_2m": float(overrides.get("temperature_2m", latest_row.get("temperature_2m", 0.0))),
-        "relative_humidity_2m": float(
-            overrides.get("relative_humidity_2m", latest_row.get("relative_humidity_2m", 0.0))
-        ),
-        "wind_speed_10m": float(overrides.get("wind_speed_10m", latest_row.get("wind_speed_10m", 0.0))),
-        "surface_pressure": float(overrides.get("surface_pressure", latest_row.get("surface_pressure", 0.0))),
-        "rainfall": float(overrides.get("rainfall", latest_row.get("rainfall", 0.0))),
         "hour": int(overrides.get("hour", now_local.hour)),
         "day_of_week": int(overrides.get("day_of_week", now_local.weekday())),
         "month": int(overrides.get("month", now_local.month)),

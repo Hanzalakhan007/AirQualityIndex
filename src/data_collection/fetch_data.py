@@ -14,7 +14,6 @@ from config.settings import (
     DEFAULT_LAT,
     DEFAULT_LON,
     OPEN_METEO_AIR_QUALITY,
-    OPEN_METEO_HISTORICAL_WEATHER,
     OPENWEATHER_AIR_POLLUTION_HISTORY,
     OPENWEATHER_API_KEY,
     RAW_DIR,
@@ -107,84 +106,11 @@ def fetch_openmeteo_historical_aqi(lat: float, lon: float, start_date: int, end_
                 "pm2_5": pm25 or 0.0,
                 "pm10": hourly.get("pm10", [0.0] * len(timestamps))[index] or 0.0,
                 "nh3": 0.0,
-                "temperature_2m": 0.0,
-                "relative_humidity_2m": 0.0,
-                "wind_speed_10m": 0.0,
-                "surface_pressure": 0.0,
-                "rainfall": 0.0,
                 "source": "openmeteo",
             }
         )
     print(f"Fetched {len(rows)} rows from Open-Meteo for {start_iso} -> {end_iso}.")
     return rows
-
-
-def fetch_openmeteo_historical_weather(lat: float, lon: float, start_date: int, end_date: int) -> list[dict] | None:
-    """Fetch hourly historical weather features from Open-Meteo archive data."""
-    start_iso = datetime.fromtimestamp(start_date, tz=timezone.utc).date().isoformat()
-    end_iso = datetime.fromtimestamp(end_date, tz=timezone.utc).date().isoformat()
-    params = {
-        "latitude": lat,
-        "longitude": lon,
-        "start_date": start_iso,
-        "end_date": end_iso,
-        "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m,surface_pressure,rain",
-        "timezone": TIMEZONE,
-    }
-    try:
-        response = requests.get(OPEN_METEO_HISTORICAL_WEATHER, params=params, timeout=90)
-        response.raise_for_status()
-    except RequestException as exc:
-        print(f"Error fetching Open-Meteo weather data: {exc}")
-        return None
-
-    hourly = response.json().get("hourly", {})
-    timestamps = hourly.get("time", [])
-    rows = []
-    for index, timestamp in enumerate(timestamps):
-        rows.append(
-            {
-                "timestamp": datetime.fromisoformat(timestamp),
-                "temperature_2m": hourly.get("temperature_2m", [0.0] * len(timestamps))[index] or 0.0,
-                "relative_humidity_2m": hourly.get("relative_humidity_2m", [0.0] * len(timestamps))[index] or 0.0,
-                "wind_speed_10m": hourly.get("wind_speed_10m", [0.0] * len(timestamps))[index] or 0.0,
-                "surface_pressure": hourly.get("surface_pressure", [0.0] * len(timestamps))[index] or 0.0,
-                "rainfall": hourly.get("rain", [0.0] * len(timestamps))[index] or 0.0,
-            }
-        )
-    print(f"Fetched {len(rows)} weather rows from Open-Meteo for {start_iso} -> {end_iso}.")
-    return rows
-
-
-def merge_air_quality_and_weather_rows(
-    air_quality_rows: list[dict],
-    weather_rows: list[dict] | None,
-) -> list[dict]:
-    """Join Open-Meteo weather features onto hourly air-quality rows by timestamp."""
-    if not air_quality_rows:
-        return []
-
-    weather_lookup: dict[str, dict] = {}
-    for row in weather_rows or []:
-        timestamp = row.get("timestamp")
-        if timestamp is None:
-            continue
-        weather_lookup[str(pd.to_datetime(timestamp))] = row
-
-    merged_rows: list[dict] = []
-    for row in air_quality_rows:
-        merged = dict(row)
-        timestamp = row.get("timestamp")
-        if timestamp is None and "dt" in row:
-            timestamp = datetime.fromtimestamp(row["dt"])
-        weather = weather_lookup.get(str(pd.to_datetime(timestamp))) if timestamp is not None else None
-        merged["temperature_2m"] = float((weather or {}).get("temperature_2m", 0.0) or 0.0)
-        merged["relative_humidity_2m"] = float((weather or {}).get("relative_humidity_2m", 0.0) or 0.0)
-        merged["wind_speed_10m"] = float((weather or {}).get("wind_speed_10m", 0.0) or 0.0)
-        merged["surface_pressure"] = float((weather or {}).get("surface_pressure", 0.0) or 0.0)
-        merged["rainfall"] = float((weather or {}).get("rainfall", 0.0) or 0.0)
-        merged_rows.append(merged)
-    return merged_rows
 
 
 def process_and_save_data(raw_data: list[dict], output_path: str) -> None:
@@ -214,11 +140,6 @@ def process_and_save_data(raw_data: list[dict], output_path: str) -> None:
             "pm2_5": pm25,
             "pm10": components.get("pm10", 0.0),
             "nh3": components.get("nh3", 0.0),
-            "temperature_2m": item.get("temperature_2m", 0.0),
-            "relative_humidity_2m": item.get("relative_humidity_2m", 0.0),
-            "wind_speed_10m": item.get("wind_speed_10m", 0.0),
-            "surface_pressure": item.get("surface_pressure", 0.0),
-            "rainfall": item.get("rainfall", 0.0),
             "source": "openweather",
         }
         rows.append(row)
@@ -255,11 +176,6 @@ def process_raw_data(raw_data: list[dict]) -> pd.DataFrame:
                 "pm2_5": pm25,
                 "pm10": components.get("pm10", 0.0),
                 "nh3": components.get("nh3", 0.0),
-                "temperature_2m": item.get("temperature_2m", 0.0),
-                "relative_humidity_2m": item.get("relative_humidity_2m", 0.0),
-                "wind_speed_10m": item.get("wind_speed_10m", 0.0),
-                "surface_pressure": item.get("surface_pressure", 0.0),
-                "rainfall": item.get("rainfall", 0.0),
                 "source": "openweather",
             }
         )
@@ -277,8 +193,6 @@ if __name__ == "__main__":
             print("OpenWeather returned no historical rows; trying Open-Meteo fallback.")
             raw_data = fetch_openmeteo_historical_aqi(DEFAULT_LAT, DEFAULT_LON, start_time, end_time)
         if raw_data:
-            weather_rows = fetch_openmeteo_historical_weather(DEFAULT_LAT, DEFAULT_LON, start_time, end_time)
-            raw_data = merge_air_quality_and_weather_rows(raw_data, weather_rows)
             output_path = RAW_DIR / "historical_aqi.csv"
             process_and_save_data(raw_data, str(output_path))
             dataframe = process_raw_data(raw_data)
