@@ -755,7 +755,7 @@ def main() -> None:
             "Fallback: Open-Meteo air-quality feed<br>"
             "Registry: MongoDB Atlas feature store and model registry",
         )
-        st.caption(f"Designed by {AUTHOR_NAME}")
+        st.caption(f"Developed by {AUTHOR_NAME}")
 
     selected_model = None if model_name == "Best Available" else model_name
     try:
@@ -799,7 +799,7 @@ def main() -> None:
                 A cinematic monitoring dashboard for Karachi that blends live observed AQI, today's model confirmation,
                 and a polished 72-hour outlook powered by production ML pipelines.
             </div>
-            <div class="hero-meta">Lead operator: {AUTHOR_NAME} | Best model live: {best_model}</div>
+            <div class="hero-meta">Best model live: {best_model}</div>
         </div>
         """,
         unsafe_allow_html=True,
