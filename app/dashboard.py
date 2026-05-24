@@ -708,12 +708,10 @@ def main() -> None:
 
         st.markdown("### Forecast Controls")
         model_name = st.selectbox("Model strategy", model_options, index=0)
-        if st.button("Generate Forecast", width="stretch"):
+        if st.button("Refresh Live Data", width="stretch"):
             clear_caches()
             st.rerun()
-        if st.button("Reload Data", width="stretch"):
-            clear_caches()
-            st.rerun()
+        st.caption("Reloads the latest available feature store snapshot, model artifacts, and forecast output.")
 
         st.markdown("### Pollutant Inputs")
         overrides: dict[str, float] = {}
@@ -806,22 +804,12 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    action_cols = st.columns([1.1, 1.1, 4.2])
-    with action_cols[0]:
-        if st.button("Refresh Forecast", width="stretch", key="hero_refresh_forecast"):
-            clear_caches()
-            st.rerun()
-    with action_cols[1]:
-        if st.button("Sync Data", width="stretch", key="hero_sync_data"):
-            clear_caches()
-            st.rerun()
-    with action_cols[2]:
-        st.markdown(
-            '<div class="status-pill">Deployment mode: '
-            + ("MongoDB connected" if backend_status["mongo_available"] else "Local fallback active")
-            + "</div>",
-            unsafe_allow_html=True,
-        )
+    st.markdown(
+        '<div class="status-pill">Deployment mode: '
+        + ("MongoDB connected" if backend_status["mongo_available"] else "Local fallback active")
+        + "</div>",
+        unsafe_allow_html=True,
+    )
 
     if not backend_status["mongo_available"]:
         fallback_note = backend_status.get("local_feature_timestamp")
