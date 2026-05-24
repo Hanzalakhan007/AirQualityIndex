@@ -10,6 +10,7 @@ import streamlit as st
 from config.settings import DEFAULT_CITY, TIMEZONE
 from src.inference import (
     SLIDER_FEATURES,
+    alert_days,
     aqi_level_and_color,
     build_forecast_curve,
     clear_caches,
@@ -149,6 +150,34 @@ def inject_styles() -> None:
                 color: #f5deb3;
                 margin-bottom: 1rem;
             }
+            .alert-panel {
+                border-radius: 22px;
+                padding: 1rem 1.15rem;
+                margin: 0.35rem 0 1rem 0;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                box-shadow: 0 16px 30px rgba(0, 0, 0, 0.16);
+            }
+            .alert-panel.hazardous {
+                background: linear-gradient(135deg, rgba(126, 0, 35, 0.92) 0%, rgba(83, 0, 23, 0.94) 100%);
+                border-left: 6px solid #ff8fab;
+                color: #ffe3ea;
+            }
+            .alert-panel.unhealthy {
+                background: linear-gradient(135deg, rgba(196, 59, 36, 0.92) 0%, rgba(143, 33, 20, 0.94) 100%);
+                border-left: 6px solid #ffd6a5;
+                color: #fff1de;
+            }
+            .alert-title {
+                font-size: 1rem;
+                font-weight: 800;
+                letter-spacing: 0.04em;
+                text-transform: uppercase;
+                margin-bottom: 0.35rem;
+            }
+            .alert-copy {
+                font-size: 0.98rem;
+                line-height: 1.6;
+            }
         </style>
         """,
         unsafe_allow_html=True,
@@ -267,6 +296,33 @@ def render_downloads(predictions: list[float], forecast_dates: list[str]) -> Non
     )
 
 
+def render_alert_panel(predictions: list[float]) -> None:
+    alerts = alert_days(predictions)
+    if not alerts:
+        return
+
+    hazardous_alerts = [item for item in alerts if item["level"] == "Hazardous"]
+    panel_type = "hazardous" if hazardous_alerts else "unhealthy"
+    headline = "Hazardous AQI Alert" if hazardous_alerts else "Air Quality Alert"
+    days_text = ", ".join(f"Day {item['day']} ({item['aqi']:.1f})" for item in alerts)
+    guidance = (
+        "Avoid outdoor activity, keep windows closed, and use protective masks if travel is necessary."
+        if hazardous_alerts
+        else "Sensitive groups should reduce outdoor exposure and monitor conditions closely."
+    )
+    st.markdown(
+        f"""
+        <div class="alert-panel {panel_type}">
+            <div class="alert-title">{headline}</div>
+            <div class="alert-copy">
+                Forecast risk detected for {days_text}. {guidance}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def main() -> None:
     st.set_page_config(page_title="AQI Forecast Studio", layout="wide")
     inject_styles()
@@ -368,6 +424,8 @@ def main() -> None:
             f'<div class="callout"><b>Fallback mode:</b> MongoDB is unavailable, so the dashboard is using local artifacts.{fallback_text}</div>',
             unsafe_allow_html=True,
         )
+
+    render_alert_panel(predictions)
 
     top_cols = st.columns(3)
     with top_cols[0]:
