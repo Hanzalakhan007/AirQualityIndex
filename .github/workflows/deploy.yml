@@ -53,16 +53,18 @@ jobs:
         run: |
           attempts=15
           delay=20
+          base_url="${STREAMLIT_APP_URL%/}"
+          health_url="${base_url}/_stcore/health"
           for attempt in $(seq 1 "$attempts"); do
-            status_code=$(curl -L -s -o response.html -w "%{http_code}" "$STREAMLIT_APP_URL")
-            if [ "$status_code" = "200" ] && grep -qi "streamlit\|aqi\|karachi" response.html; then
-              echo "Streamlit dashboard is live at $STREAMLIT_APP_URL"
+            status_code=$(curl -sS -o response.json -w "%{http_code}" "$health_url")
+            if [ "$status_code" = "200" ] && grep -qi "ok" response.json; then
+              echo "Streamlit dashboard is live at $base_url"
               exit 0
             fi
-            echo "Attempt $attempt/$attempts: dashboard not ready yet (HTTP $status_code). Retrying in ${delay}s..."
+            echo "Attempt $attempt/$attempts: dashboard not ready yet at $health_url (HTTP $status_code). Retrying in ${delay}s..."
             sleep "$delay"
           done
-          echo "::error::Streamlit dashboard did not become reachable at $STREAMLIT_APP_URL"
+          echo "::error::Streamlit dashboard did not become reachable at $health_url"
           exit 1
 
   verify-api-health:
