@@ -1,7 +1,7 @@
 """Streamlit dashboard for AQI forecasting."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -53,7 +53,7 @@ def format_timestamp(value: object) -> str:
     try:
         parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
         if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
+            parsed = parsed.replace(tzinfo=ZoneInfo(TIMEZONE))
         localized = parsed.astimezone(ZoneInfo(TIMEZONE))
         return localized.strftime("%b %d, %Y %I:%M %p")
     except ValueError:
@@ -850,9 +850,9 @@ def main() -> None:
         )
         st.markdown(
             render_metric_card(
-                "Forecast Signal",
+                "3-Day Outlook",
                 f"{forecast_signal:.1f}",
-                f"{delta_text} | {reliability_text}",
+                f"Average AQI across the next 3 days. {delta_text} | {reliability_text}",
                 "#53d7c2",
             ),
             unsafe_allow_html=True,

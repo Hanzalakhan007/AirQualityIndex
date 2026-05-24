@@ -2,6 +2,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
@@ -72,6 +73,7 @@ def fetch_openmeteo_historical_aqi(lat: float, lon: float, start_date: int, end_
     """Fetch Open-Meteo air-quality data in the same row shape used for feature building."""
     start_iso = datetime.fromtimestamp(start_date, tz=timezone.utc).date().isoformat()
     end_iso = datetime.fromtimestamp(end_date, tz=timezone.utc).date().isoformat()
+    local_tz = ZoneInfo(TIMEZONE)
     params = {
         "latitude": lat,
         "longitude": lon,
@@ -95,7 +97,7 @@ def fetch_openmeteo_historical_aqi(lat: float, lon: float, start_date: int, end_
         pm25 = hourly.get("pm2_5", [0.0] * len(timestamps))[index]
         rows.append(
             {
-                "timestamp": datetime.fromisoformat(timestamp),
+                "timestamp": datetime.fromisoformat(timestamp).replace(tzinfo=local_tz),
                 "aqi": float(us_aqi) if us_aqi is not None else None,
                 "us_aqi": float(us_aqi) if us_aqi is not None else pm25_to_us_aqi(pm25),
                 "co": hourly.get("carbon_monoxide", [0.0] * len(timestamps))[index] or 0.0,
@@ -120,11 +122,12 @@ def process_and_save_data(raw_data: list[dict], output_path: str) -> None:
         return
 
     rows = []
+    local_tz = ZoneInfo(TIMEZONE)
     for item in raw_data:
         if item.get("source") == "openmeteo":
             rows.append(item)
             continue
-        timestamp = datetime.fromtimestamp(item["dt"])
+        timestamp = datetime.fromtimestamp(item["dt"], tz=timezone.utc).astimezone(local_tz)
         aqi = item.get("main", {}).get("aqi")
         components = item.get("components", {})
         pm25 = components.get("pm2_5", 0.0)
@@ -155,11 +158,12 @@ def process_raw_data(raw_data: list[dict]) -> pd.DataFrame:
         return pd.DataFrame()
 
     rows = []
+    local_tz = ZoneInfo(TIMEZONE)
     for item in raw_data:
         if item.get("source") == "openmeteo":
             rows.append(item)
             continue
-        timestamp = datetime.fromtimestamp(item["dt"])
+        timestamp = datetime.fromtimestamp(item["dt"], tz=timezone.utc).astimezone(local_tz)
         aqi = item.get("main", {}).get("aqi")
         components = item.get("components", {})
         pm25 = components.get("pm2_5", 0.0)
