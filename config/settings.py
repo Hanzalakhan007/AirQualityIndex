@@ -52,6 +52,7 @@ OPEN_METEO_AIR_QUALITY = "https://air-quality-api.open-meteo.com/v1/air-quality"
 OPENWEATHER_AIR_POLLUTION_HISTORY = "https://api.openweathermap.org/data/2.5/air_pollution/history"
 
 AQI_SCALE_1_5 = os.getenv("AQI_SCALE_1_5", "false").lower() in ("true", "1", "yes")
+AQI_ALERT_THRESHOLD = float(os.getenv("AQI_ALERT_THRESHOLD", "101"))
 AQI_UNHEALTHY_THRESHOLD = 150
 AQI_HAZARDOUS_THRESHOLD = 200
 KARACHI_REFERENCE_AQI = float(os.getenv("KARACHI_REFERENCE_AQI", "96.0"))

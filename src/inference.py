@@ -15,6 +15,7 @@ from gridfs import GridFSBucket
 from zoneinfo import ZoneInfo
 
 from config.settings import (
+    AQI_ALERT_THRESHOLD,
     AQI_CALIBRATION_ENABLED,
     AQI_HAZARDOUS_THRESHOLD,
     AQI_UNHEALTHY_THRESHOLD,
@@ -651,12 +652,18 @@ def alert_days(predictions: list[float]) -> list[dict[str, Any]]:
     future_predictions = predictions[1:4] if len(predictions) > 1 else predictions
     labels = ["Tomorrow", "Day 2", "Day 3"]
     for index, value in enumerate(future_predictions):
-        if value >= AQI_UNHEALTHY_THRESHOLD:
+        if value >= AQI_ALERT_THRESHOLD:
+            if value >= AQI_HAZARDOUS_THRESHOLD:
+                level = "Hazardous"
+            elif value >= AQI_UNHEALTHY_THRESHOLD:
+                level = "Unhealthy"
+            else:
+                level = "Unhealthy for Sensitive Groups"
             alerts.append(
                 {
                     "day": labels[index] if index < len(labels) else f"Day {index + 1}",
                     "aqi": value,
-                    "level": "Hazardous" if value >= AQI_HAZARDOUS_THRESHOLD else "Unhealthy",
+                    "level": level,
                 }
             )
     return alerts
