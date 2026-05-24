@@ -45,10 +45,14 @@ def predict():
             {
                 "model": forecast["model_name"],
                 "current_aqi": forecast["today_aqi"],
-                "current_source": "Model Predicted Today",
+                "current_source": "Model confirmation signal",
                 "current_category": aqi_level_and_color(forecast["today_aqi"])[0],
+                "today_confirmation_aqi": forecast["today_aqi"],
+                "today_confirmation_date": forecast["today_date"],
                 "forecast_dates": forecast["forecast_dates"],
                 "predictions": forecast["predictions"],
+                "next_three_day_dates": forecast["next_three_day_dates"],
+                "next_three_day_predictions": forecast["next_three_day_predictions"],
                 "alerts": alert_days(forecast["predictions"]),
                 "leaderboard": forecast["leaderboard"],
             }

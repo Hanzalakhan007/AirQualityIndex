@@ -213,8 +213,8 @@ def render_metric_card(label: str, value: str, subtext: str, color: str) -> str:
 
 
 def render_forecast_cards(predictions: list[float], forecast_dates: list[str]) -> None:
-    columns = st.columns(4)
-    labels = ["Today", "Tomorrow", "Day 3", "Day 4"]
+    columns = st.columns(3)
+    labels = ["Tomorrow", "Day 2", "Day 3"]
     for index, column in enumerate(columns):
         level, color = aqi_level_and_color(predictions[index])
         with column:
@@ -261,6 +261,7 @@ def render_main_chart(history_df: pd.DataFrame, predictions: list[float]) -> Non
             marker={"size": 8, "color": "#f6bd60"},
         )
     )
+    max_chart_value = max(predictions[1:4] or predictions or [0.0])
     figure.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(7, 18, 28, 0.40)",
@@ -271,26 +272,32 @@ def render_main_chart(history_df: pd.DataFrame, predictions: list[float]) -> Non
         yaxis_title="AQI",
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0},
         shapes=add_aqi_band_shapes(),
-        yaxis={"range": [0, max(220, max(predictions) + 35)]},
+        yaxis={"range": [0, max(220, max_chart_value + 35)]},
     )
     st.plotly_chart(figure, width="stretch")
 
 
-def render_downloads(predictions: list[float], forecast_dates: list[str]) -> None:
+def render_downloads(
+    today_prediction: float | None,
+    today_date: str | None,
+    predictions: list[float],
+    forecast_dates: list[str],
+) -> None:
+    timeline_values = [today_prediction, *predictions]
     report_df = pd.DataFrame(
         {
-            "Day": ["Today", "Tomorrow", "Day 3", "Day 4"],
-            "Date": forecast_dates,
-            "Predicted AQI": predictions,
-            "Category": [aqi_level_and_color(value)[0] for value in predictions],
-            "Health Recommendation": [health_recommendation(value) for value in predictions],
+            "Window": ["Today confirmation", "Forecast day 1", "Forecast day 2", "Forecast day 3"],
+            "Date": [today_date, *forecast_dates],
+            "Predicted AQI": timeline_values,
+            "Category": [aqi_level_and_color(value)[0] for value in timeline_values],
+            "Health Recommendation": [health_recommendation(value) for value in timeline_values],
         }
     )
     st.dataframe(report_df, width="stretch", hide_index=True)
     st.download_button(
-        "Download forecast CSV",
+        "Download 3-day forecast CSV",
         report_df.to_csv(index=False).encode("utf-8"),
-        "aqi_forecast_report.csv",
+        "aqi_3_day_forecast_report.csv",
         "text/csv",
         use_container_width=True,
     )
@@ -304,7 +311,7 @@ def render_alert_panel(predictions: list[float]) -> None:
     hazardous_alerts = [item for item in alerts if item["level"] == "Hazardous"]
     panel_type = "hazardous" if hazardous_alerts else "unhealthy"
     headline = "Hazardous AQI Alert" if hazardous_alerts else "Air Quality Alert"
-    days_text = ", ".join(f"Day {item['day']} ({item['aqi']:.1f})" for item in alerts)
+    days_text = ", ".join(f"{item['day']} ({item['aqi']:.1f})" for item in alerts)
     guidance = (
         "Avoid outdoor activity, keep windows closed, and use protective masks if travel is necessary."
         if hazardous_alerts
@@ -385,8 +392,10 @@ def main() -> None:
         st.stop()
 
     predictions = forecast["predictions"]
-    forecast_dates = forecast["forecast_dates"]
     predicted_today_aqi = forecast["today_aqi"]
+    today_date = forecast["today_date"]
+    next_three_day_predictions = forecast["next_three_day_predictions"]
+    next_three_day_dates = forecast["next_three_day_dates"]
     best_model = forecast["model_name"] or get_default_model_name()
     leaderboard = forecast["leaderboard"] or get_model_leaderboard()
     history_df = get_recent_daily_history()
@@ -408,8 +417,8 @@ def main() -> None:
             <div class="eyebrow">AQI Forecast Studio</div>
             <div class="hero-title">{DEFAULT_CITY} Air Quality Predictor</div>
             <div class="hero-copy">
-                A clean forecast view focused on what matters most: current AQI, today’s predicted AQI,
-                the next 4 days, and a quick health decision guide.
+                A clean forecast view focused on what matters most: current AQI, today's predicted AQI
+                for confirmation, the next 3 days, and a quick health decision guide.
             </div>
             <div class="signature">Designed by {AUTHOR_NAME}</div>
         </div>
@@ -430,20 +439,38 @@ def main() -> None:
     top_cols = st.columns(3)
     with top_cols[0]:
         observed_text = f"{current_observed_aqi:.1f}" if current_observed_aqi is not None else "N/A"
-        observed_subtext = f"{observed_level} · Source: {current_source}"
-        st.markdown(render_metric_card("Current Observed AQI", observed_text, observed_subtext, observed_color), unsafe_allow_html=True)
+        observed_subtext = f"{observed_level} - Source: {current_source}"
+        st.markdown(
+            render_metric_card("Current Observed AQI", observed_text, observed_subtext, observed_color),
+            unsafe_allow_html=True,
+        )
     with top_cols[1]:
         st.markdown(
-            render_metric_card("Predicted AQI Today", f"{predicted_today_aqi:.1f}", f"{forecast_level} · Model forecast", forecast_color),
+            render_metric_card(
+                "Predicted AQI Today",
+                f"{predicted_today_aqi:.1f}",
+                f"{forecast_level} - Confirmation signal",
+                forecast_color,
+            ),
             unsafe_allow_html=True,
         )
     with top_cols[2]:
         reliability = leaderboard[0] if leaderboard else None
         reliability_text = f"RMSE {float(reliability['rmse']):.2f}" if reliability else "Metrics unavailable"
-        st.markdown(render_metric_card("Forecast Signal", f"{sum(predictions) / len(predictions):.1f}", f"{delta_text} · {reliability_text}", "#59c3c3"), unsafe_allow_html=True)
+        forecast_signal = sum(next_three_day_predictions) / len(next_three_day_predictions) if next_three_day_predictions else 0.0
+        st.markdown(
+            render_metric_card(
+                "Forecast Signal",
+                f"{forecast_signal:.1f}",
+                f"{delta_text} - {reliability_text}",
+                "#59c3c3",
+            ),
+            unsafe_allow_html=True,
+        )
 
-    st.markdown('<div class="section-title">4-Day Forecast</div>', unsafe_allow_html=True)
-    render_forecast_cards(predictions, forecast_dates)
+    st.markdown('<div class="section-title">3-Day Forecast</div>', unsafe_allow_html=True)
+    st.caption("Today's model prediction is shown above for confirmation. The forecast below covers the next 3 days.")
+    render_forecast_cards(next_three_day_predictions, next_three_day_dates)
 
     st.markdown('<div class="section-title">Observed vs Forecast</div>', unsafe_allow_html=True)
     render_main_chart(history_df, predictions)
@@ -466,7 +493,7 @@ def main() -> None:
         )
     with lower_right:
         st.markdown('<div class="section-title">Download Report</div>', unsafe_allow_html=True)
-        render_downloads(predictions, forecast_dates)
+        render_downloads(predicted_today_aqi, today_date, next_three_day_predictions, next_three_day_dates)
 
     st.markdown("---")
     st.caption(f"Rendered on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | {AUTHOR_NAME}")

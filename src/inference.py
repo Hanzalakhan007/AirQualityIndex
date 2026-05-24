@@ -538,7 +538,7 @@ def fetch_openmeteo_snapshot() -> dict[str, Any] | None:
 
 
 def predict_next_days(model_name: str | None = None, overrides: dict[str, float] | None = None) -> dict[str, Any]:
-    """Generate a four-day AQI forecast for today plus the next three days."""
+    """Generate today's confirmation AQI plus a three-day AQI forecast."""
     metadata = get_model_registry_metadata()
     selected_model = get_default_model_name() if not model_name or model_name == "Best Available" else model_name
     available_models = get_available_model_names()
@@ -569,6 +569,8 @@ def predict_next_days(model_name: str | None = None, overrides: dict[str, float]
     predictions = [calibrate_aqi(max(1.0, float(value))) or 0.0 for value in raw_prediction[:4]]
     now_local = datetime.now(ZoneInfo(TIMEZONE))
     forecast_dates = [(now_local + timedelta(days=index)).strftime("%b %d") for index in range(4)]
+    next_three_day_predictions = predictions[1:4]
+    next_three_day_dates = forecast_dates[1:4]
 
     return {
         "city": DEFAULT_CITY,
@@ -577,7 +579,10 @@ def predict_next_days(model_name: str | None = None, overrides: dict[str, float]
         "input_frame": aligned_input,
         "predictions": predictions,
         "today_aqi": predictions[0] if predictions else None,
+        "today_date": forecast_dates[0] if forecast_dates else None,
         "forecast_dates": forecast_dates,
+        "next_three_day_predictions": next_three_day_predictions,
+        "next_three_day_dates": next_three_day_dates,
         "model_metrics": metadata.get(selected_model, {}).get("metrics", {}),
         "leaderboard": get_model_leaderboard(),
     }
@@ -621,17 +626,18 @@ def get_recent_daily_history(days: int = 14) -> pd.DataFrame:
 
 
 def build_forecast_curve(predictions: list[float]) -> pd.DataFrame:
-    """Create a simple hourly forecast curve for today plus the next three days."""
+    """Create a simple hourly forecast curve for the next three days."""
     start = datetime.now(ZoneInfo(TIMEZONE)).replace(minute=0, second=0, microsecond=0)
     rows = []
-    for day_index, prediction in enumerate(predictions):
+    future_predictions = predictions[1:4] if len(predictions) > 1 else predictions
+    for day_index, prediction in enumerate(future_predictions, start=1):
         day_start = start + timedelta(days=day_index)
         for hour in range(24):
             rows.append(
                 {
                     "timestamp": day_start + timedelta(hours=hour),
                     "aqi_predicted": prediction,
-                    "day_label": f"Day {day_index + 1}",
+                    "day_label": f"Day {day_index}",
                 }
             )
     dataframe = pd.DataFrame(rows)
@@ -642,11 +648,13 @@ def build_forecast_curve(predictions: list[float]) -> pd.DataFrame:
 
 def alert_days(predictions: list[float]) -> list[dict[str, Any]]:
     alerts = []
-    for index, value in enumerate(predictions, start=1):
+    future_predictions = predictions[1:4] if len(predictions) > 1 else predictions
+    labels = ["Tomorrow", "Day 2", "Day 3"]
+    for index, value in enumerate(future_predictions):
         if value >= AQI_UNHEALTHY_THRESHOLD:
             alerts.append(
                 {
-                    "day": index,
+                    "day": labels[index] if index < len(labels) else f"Day {index + 1}",
                     "aqi": value,
                     "level": "Hazardous" if value >= AQI_HAZARDOUS_THRESHOLD else "Unhealthy",
                 }
