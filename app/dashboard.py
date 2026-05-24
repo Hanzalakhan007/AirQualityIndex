@@ -14,6 +14,7 @@ from src.inference import (
     aqi_level_and_color,
     build_forecast_curve,
     clear_caches,
+    explainability_images,
     get_available_model_names,
     get_available_model_options,
     get_backend_status,
@@ -37,11 +38,11 @@ POLLUTANT_LABELS = {
     "nh3": "NH3",
 }
 AQI_BANDS = [
-    (0, 50, "rgba(46, 204, 113, 0.10)"),
-    (51, 100, "rgba(241, 196, 15, 0.10)"),
-    (101, 150, "rgba(230, 126, 34, 0.10)"),
-    (151, 200, "rgba(231, 76, 60, 0.10)"),
-    (201, 500, "rgba(127, 29, 29, 0.12)"),
+    (0, 50, "rgba(63, 197, 123, 0.10)"),
+    (51, 100, "rgba(247, 201, 72, 0.11)"),
+    (101, 150, "rgba(255, 145, 77, 0.12)"),
+    (151, 200, "rgba(245, 84, 84, 0.12)"),
+    (201, 500, "rgba(121, 27, 27, 0.12)"),
 ]
 
 
@@ -57,126 +58,351 @@ def format_timestamp(value: object) -> str:
 def inject_styles() -> None:
     st.markdown(
         """
-        <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
         <style>
+            :root {
+                --bg-0: #071017;
+                --bg-1: #0c1822;
+                --bg-2: #111f2c;
+                --bg-3: #162636;
+                --line: rgba(198, 214, 231, 0.12);
+                --muted: #9fb2c4;
+                --text: #e8eff6;
+                --cyan: #7dd8ff;
+                --aqua: #53d7c2;
+                --gold: #f4d35e;
+                --amber: #ff9f43;
+                --good: #56d486;
+                --danger: #ff6b6b;
+            }
+
             .stApp {
-                font-family: 'Manrope', sans-serif !important;
-                color: #edf4f8;
+                font-family: 'Instrument Sans', sans-serif !important;
+                color: var(--text);
                 background:
-                    radial-gradient(circle at top left, rgba(89, 195, 195, 0.12), transparent 28%),
-                    linear-gradient(160deg, #07121b 0%, #0d1d2a 50%, #122634 100%);
+                    radial-gradient(circle at 12% 18%, rgba(83, 215, 194, 0.18), transparent 26%),
+                    radial-gradient(circle at 88% 8%, rgba(125, 216, 255, 0.12), transparent 24%),
+                    linear-gradient(180deg, #060c12 0%, #0a131c 35%, #0d1823 100%);
             }
+
+            .main .block-container {
+                padding-top: 2.2rem;
+                padding-bottom: 2.5rem;
+                max-width: 1380px;
+            }
+
             .stSidebar {
-                background: linear-gradient(180deg, rgba(240, 248, 255, 0.97) 0%, rgba(230, 239, 246, 0.97) 100%);
+                background:
+                    linear-gradient(180deg, rgba(16, 28, 39, 0.98) 0%, rgba(21, 35, 49, 0.98) 100%);
+                border-right: 1px solid rgba(255, 255, 255, 0.07);
             }
+
             .stSidebar * {
-                color: #122433 !important;
+                color: #dce7f2 !important;
             }
-            .hero-card {
-                background: linear-gradient(135deg, rgba(10, 21, 31, 0.98) 0%, rgba(14, 30, 45, 0.94) 100%);
-                border: 1px solid rgba(125, 211, 252, 0.16);
-                border-radius: 28px;
-                padding: 2.1rem 2.2rem;
-                box-shadow: 0 24px 58px rgba(0, 0, 0, 0.25);
-                margin-bottom: 1rem;
+
+            .stSidebar [data-testid="stMarkdownContainer"] p {
+                color: #c7d5e2 !important;
             }
-            .eyebrow {
-                color: #7dd3fc;
-                text-transform: uppercase;
-                letter-spacing: 0.18em;
-                font-size: 0.78rem;
-                font-weight: 800;
+
+            [data-testid="stSidebar"] .stButton > button,
+            [data-testid="stSidebar"] .stDownloadButton > button,
+            .stButton > button {
+                border-radius: 16px;
+                border: 1px solid rgba(255, 255, 255, 0.10);
+                background: linear-gradient(180deg, rgba(16, 27, 39, 0.96), rgba(18, 31, 45, 0.96));
+                color: #edf5ff;
+                font-weight: 700;
+                transition: all 0.22s ease;
+                box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
             }
-            .hero-title {
-                font-size: 3.2rem;
-                font-weight: 800;
-                line-height: 1.04;
-                margin: 0.35rem 0 0.55rem 0;
+
+            .stButton > button:hover,
+            [data-testid="stSidebar"] .stButton > button:hover {
+                border-color: rgba(125, 216, 255, 0.35);
+                transform: translateY(-1px);
+                box-shadow: 0 14px 30px rgba(0, 0, 0, 0.24);
             }
-            .hero-copy {
-                color: #a8bccb;
-                line-height: 1.65;
-                max-width: 56rem;
-            }
-            .signature {
-                color: #d9e5ec;
-                margin-top: 0.9rem;
-                font-size: 0.94rem;
+
+            .stSelectbox label,
+            .stSlider label {
                 font-weight: 600;
+                color: #dce7f2 !important;
             }
-            .card, .forecast-card {
-                background: rgba(11, 24, 37, 0.86);
+
+            div[data-baseweb="select"] > div,
+            div[data-baseweb="input"] > div {
+                background: rgba(22, 36, 50, 0.86) !important;
+                border-radius: 14px !important;
+                border: 1px solid rgba(255, 255, 255, 0.08) !important;
+            }
+
+            .hero-shell {
+                position: relative;
+                overflow: hidden;
+                border-radius: 34px;
+                padding: 2.3rem 2.4rem 2rem 2.4rem;
+                background:
+                    radial-gradient(circle at top right, rgba(125, 216, 255, 0.14), transparent 28%),
+                    linear-gradient(140deg, rgba(10, 20, 31, 0.98) 0%, rgba(15, 27, 39, 0.95) 58%, rgba(16, 34, 50, 0.92) 100%);
+                border: 1px solid rgba(155, 194, 230, 0.12);
+                box-shadow: 0 28px 68px rgba(0, 0, 0, 0.28);
+                margin-bottom: 1.1rem;
+            }
+
+            .hero-shell:before {
+                content: "";
+                position: absolute;
+                inset: 0;
+                background:
+                    linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.03), transparent);
+                pointer-events: none;
+            }
+
+            .eyebrow {
+                color: var(--cyan);
+                text-transform: uppercase;
+                letter-spacing: 0.24em;
+                font-size: 0.74rem;
+                font-weight: 800;
+            }
+
+            .hero-title {
+                font-family: 'Space Grotesk', sans-serif;
+                font-size: 4rem;
+                line-height: 0.98;
+                font-weight: 700;
+                margin: 0.45rem 0 0.7rem 0;
+                color: #edf4fb;
+            }
+
+            .hero-copy {
+                color: #b9c8d6;
+                max-width: 48rem;
+                line-height: 1.75;
+                font-size: 1.02rem;
+            }
+
+            .hero-meta {
+                display: inline-flex;
+                gap: 0.6rem;
+                align-items: center;
+                margin-top: 1rem;
+                padding: 0.55rem 0.85rem;
+                border-radius: 999px;
+                background: rgba(17, 33, 48, 0.82);
                 border: 1px solid rgba(255, 255, 255, 0.08);
-                border-radius: 22px;
-                box-shadow: 0 18px 34px rgba(0, 0, 0, 0.18);
+                color: #d9e6f0;
+                font-size: 0.9rem;
             }
-            .card {
-                padding: 1.2rem 1.3rem;
-                height: 100%;
+
+            .sidebar-panel,
+            .metric-card,
+            .feature-card,
+            .panel-card,
+            .forecast-card {
+                border-radius: 24px;
+                background: linear-gradient(180deg, rgba(16, 29, 42, 0.96), rgba(18, 33, 47, 0.92));
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                box-shadow: 0 18px 38px rgba(0, 0, 0, 0.2);
             }
+
+            .sidebar-panel {
+                padding: 1.05rem 1rem;
+                margin: 0.6rem 0 1rem 0;
+            }
+
+            .metric-card,
+            .panel-card {
+                padding: 1.25rem 1.2rem;
+            }
+
+            .feature-card {
+                padding: 1.1rem 1rem;
+            }
+
+            .metric-label,
+            .section-kicker,
+            .forecast-label {
+                text-transform: uppercase;
+                letter-spacing: 0.16em;
+                font-size: 0.72rem;
+                color: #90a5b8;
+                font-weight: 800;
+            }
+
+            .metric-value {
+                margin-top: 0.65rem;
+                font-family: 'Space Grotesk', sans-serif;
+                font-size: 2.8rem;
+                line-height: 1;
+                font-weight: 700;
+            }
+
+            .metric-subtext,
+            .panel-copy {
+                margin-top: 0.45rem;
+                color: #c9d6e0;
+                line-height: 1.6;
+                font-size: 0.96rem;
+            }
+
+            .feature-card.observed-hero {
+                padding: 1.55rem 1.5rem;
+                min-height: 280px;
+                background:
+                    radial-gradient(circle at top left, rgba(244, 211, 94, 0.16), transparent 30%),
+                    linear-gradient(160deg, rgba(21, 33, 49, 0.98), rgba(20, 30, 45, 0.95));
+            }
+
+            .observed-title {
+                font-family: 'Space Grotesk', sans-serif;
+                font-size: 1.05rem;
+                font-weight: 700;
+                letter-spacing: 0.16em;
+                text-transform: uppercase;
+                color: #ffe96d;
+            }
+
+            .observed-aqi {
+                font-family: 'Space Grotesk', sans-serif;
+                font-size: 5.4rem;
+                line-height: 0.95;
+                margin: 1rem 0 0.65rem 0;
+                font-weight: 700;
+            }
+
+            .observed-band {
+                font-size: 1.3rem;
+                font-weight: 700;
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+            }
+
+            .section-title {
+                font-family: 'Space Grotesk', sans-serif;
+                font-size: 2.05rem;
+                font-weight: 700;
+                margin: 1.35rem 0 0.3rem 0;
+                color: #edf4fb;
+            }
+
+            .section-copy {
+                color: #98adbf;
+                margin-bottom: 0.95rem;
+                line-height: 1.7;
+            }
+
             .forecast-card {
                 padding: 1.15rem 1rem;
-                min-height: 170px;
+                min-height: 190px;
             }
-            .label {
-                text-transform: uppercase;
-                letter-spacing: 0.12em;
-                font-size: 0.74rem;
-                color: #9db1c1;
-                font-weight: 800;
-                margin-bottom: 0.45rem;
-            }
-            .value {
-                font-size: 2.45rem;
-                font-weight: 800;
+
+            .forecast-value {
+                font-family: 'Space Grotesk', sans-serif;
+                font-size: 2.55rem;
+                font-weight: 700;
                 line-height: 1;
-                margin-bottom: 0.3rem;
+                margin: 0.85rem 0 0.3rem 0;
             }
-            .subtext {
-                color: #c6d3dc;
-                font-size: 0.92rem;
-                line-height: 1.55;
-            }
-            .section-title {
-                font-size: 1.22rem;
-                font-weight: 800;
-                margin: 0.95rem 0 0.8rem 0;
-            }
-            .callout {
-                border-left: 5px solid #f6bd60;
-                background: rgba(246, 189, 96, 0.10);
-                border-radius: 18px;
-                padding: 1rem 1.15rem;
-                color: #f5deb3;
-                margin-bottom: 1rem;
-            }
+
             .alert-panel {
-                border-radius: 22px;
+                border-radius: 24px;
                 padding: 1rem 1.15rem;
-                margin: 0.35rem 0 1rem 0;
+                margin: 0.4rem 0 1rem 0;
                 border: 1px solid rgba(255, 255, 255, 0.08);
-                box-shadow: 0 16px 30px rgba(0, 0, 0, 0.16);
+                box-shadow: 0 14px 32px rgba(0, 0, 0, 0.18);
             }
+
             .alert-panel.hazardous {
-                background: linear-gradient(135deg, rgba(126, 0, 35, 0.92) 0%, rgba(83, 0, 23, 0.94) 100%);
-                border-left: 6px solid #ff8fab;
-                color: #ffe3ea;
+                background: linear-gradient(135deg, rgba(118, 0, 29, 0.95), rgba(76, 0, 18, 0.96));
+                border-left: 6px solid #ff96af;
+                color: #ffe4ea;
             }
+
             .alert-panel.unhealthy {
-                background: linear-gradient(135deg, rgba(196, 59, 36, 0.92) 0%, rgba(143, 33, 20, 0.94) 100%);
-                border-left: 6px solid #ffd6a5;
-                color: #fff1de;
+                background: linear-gradient(135deg, rgba(182, 58, 28, 0.95), rgba(122, 34, 17, 0.96));
+                border-left: 6px solid #ffcb8f;
+                color: #fff2df;
             }
+
+            .alert-panel.sensitive {
+                background: linear-gradient(135deg, rgba(171, 118, 9, 0.93), rgba(120, 83, 8, 0.96));
+                border-left: 6px solid #fff07a;
+                color: #fff9d9;
+            }
+
             .alert-title {
                 font-size: 1rem;
                 font-weight: 800;
-                letter-spacing: 0.04em;
+                letter-spacing: 0.05em;
                 text-transform: uppercase;
                 margin-bottom: 0.35rem;
             }
+
             .alert-copy {
                 font-size: 0.98rem;
                 line-height: 1.6;
+            }
+
+            .guide-row {
+                display: flex;
+                align-items: center;
+                gap: 0.75rem;
+                margin-bottom: 0.9rem;
+                color: #dce7f1;
+            }
+
+            .guide-dot {
+                width: 12px;
+                height: 12px;
+                border-radius: 999px;
+                box-shadow: 0 0 0 5px rgba(255, 255, 255, 0.03);
+                flex-shrink: 0;
+            }
+
+            .status-pill {
+                display: inline-flex;
+                align-items: center;
+                gap: 0.45rem;
+                margin-top: 0.5rem;
+                padding: 0.45rem 0.75rem;
+                border-radius: 999px;
+                background: rgba(20, 41, 57, 0.9);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                color: #dce8f4;
+                font-size: 0.9rem;
+                font-weight: 600;
+            }
+
+            .tab-note {
+                color: #9db2c5;
+                line-height: 1.75;
+            }
+
+            .stTabs [data-baseweb="tab-list"] {
+                gap: 0.35rem;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+                margin-bottom: 1rem;
+            }
+
+            .stTabs [data-baseweb="tab"] {
+                background: transparent;
+                color: #b6c5d4;
+                border-radius: 14px 14px 0 0;
+                padding: 0.65rem 0.9rem;
+                font-weight: 700;
+            }
+
+            .stTabs [aria-selected="true"] {
+                color: #f0f7ff !important;
+                box-shadow: inset 0 -3px 0 var(--cyan);
+            }
+
+            [data-testid="stDataFrame"] {
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 18px;
+                overflow: hidden;
             }
         </style>
         """,
@@ -202,36 +428,75 @@ def add_aqi_band_shapes() -> list[dict[str, object]]:
     ]
 
 
+def render_sidebar_panel(title: str, icon: str, body: str) -> None:
+    st.markdown(
+        f"""
+        <div class="sidebar-panel">
+            <div style="font-family:'Space Grotesk',sans-serif; font-size:1.08rem; font-weight:700; margin-bottom:0.5rem;">
+                {icon} {title}
+            </div>
+            <div class="panel-copy" style="font-size:0.95rem;">{body}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_metric_card(label: str, value: str, subtext: str, color: str) -> str:
     return f"""
-        <div class="card">
-            <div class="label">{label}</div>
-            <div class="value" style="color:{color};">{value}</div>
-            <div class="subtext">{subtext}</div>
+        <div class="metric-card">
+            <div class="metric-label">{label}</div>
+            <div class="metric-value" style="color:{color};">{value}</div>
+            <div class="metric-subtext">{subtext}</div>
+        </div>
+    """
+
+
+def render_observed_hero(
+    current_observed_aqi: float | None,
+    observed_level: str,
+    observed_color: str,
+    current_source: str,
+    latest_timestamp: object,
+) -> str:
+    observed_text = f"{current_observed_aqi:.1f}" if current_observed_aqi is not None else "N/A"
+    return f"""
+        <div class="feature-card observed-hero">
+            <div class="observed-title">Current Observed AQI</div>
+            <div class="observed-aqi" style="color:{observed_color};">{observed_text}</div>
+            <div class="observed-band" style="color:{observed_color};">{observed_level}</div>
+            <div class="panel-copy" style="margin-top:1rem;">
+                Live reading source: <b>{current_source}</b><br>
+                Latest feature sync: <b>{format_timestamp(latest_timestamp)}</b>
+            </div>
+            <div class="status-pill">Karachi stream | {TIMEZONE}</div>
         </div>
     """
 
 
 def render_forecast_cards(predictions: list[float], forecast_dates: list[str]) -> None:
-    columns = st.columns(3)
     labels = ["Tomorrow", "Day 2", "Day 3"]
+    columns = st.columns(3)
     for index, column in enumerate(columns):
         level, color = aqi_level_and_color(predictions[index])
         with column:
             st.markdown(
                 f"""
                 <div class="forecast-card" style="border-top:4px solid {color};">
-                    <div class="label">{labels[index]}</div>
-                    <div style="font-size:0.98rem; color:#dde8ef; font-weight:700;">{forecast_dates[index]}</div>
-                    <div style="font-size:2.3rem; font-weight:800; color:{color}; margin:0.8rem 0 0.25rem 0;">{predictions[index]:.1f}</div>
-                    <div style="font-weight:700; color:{color};">{level}</div>
+                    <div class="forecast-label">{labels[index]}</div>
+                    <div style="font-size:1rem; color:#dbe7f1; font-weight:700; margin-top:0.45rem;">{forecast_dates[index]}</div>
+                    <div class="forecast-value" style="color:{color};">{predictions[index]:.1f}</div>
+                    <div style="font-weight:700; color:{color}; font-size:1rem;">{level}</div>
+                    <div class="panel-copy" style="font-size:0.9rem;">
+                        {health_recommendation(predictions[index])}
+                    </div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
 
-def render_main_chart(history_df: pd.DataFrame, predictions: list[float]) -> None:
+def render_forecast_chart(history_df: pd.DataFrame, predictions: list[float]) -> None:
     forecast_curve = build_forecast_curve(predictions)
     daily_forecast = (
         forecast_curve.assign(date=forecast_curve["timestamp"].dt.floor("D"))
@@ -247,8 +512,8 @@ def render_main_chart(history_df: pd.DataFrame, predictions: list[float]) -> Non
                 y=history_df["aqi_display"],
                 mode="lines+markers",
                 name="Observed AQI",
-                line={"width": 3, "color": "#7dd3fc"},
-                marker={"size": 7, "color": "#edf4f8"},
+                line={"width": 3, "color": "#7dd8ff"},
+                marker={"size": 7, "color": "#edf4fb"},
             )
         )
     figure.add_trace(
@@ -256,18 +521,18 @@ def render_main_chart(history_df: pd.DataFrame, predictions: list[float]) -> Non
             x=daily_forecast["date"],
             y=daily_forecast["aqi_predicted"],
             mode="lines+markers",
-            name="Forecast AQI",
-            line={"width": 3, "color": "#f6bd60", "dash": "dash"},
-            marker={"size": 8, "color": "#f6bd60"},
+            name="3-Day Forecast",
+            line={"width": 3, "color": "#f4d35e", "dash": "dash"},
+            marker={"size": 8, "color": "#f4d35e"},
         )
     )
     max_chart_value = max(predictions[1:4] or predictions or [0.0])
     figure.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(7, 18, 28, 0.40)",
-        font={"color": "#edf4f8"},
-        height=400,
-        margin={"l": 20, "r": 20, "t": 20, "b": 20},
+        plot_bgcolor="rgba(11, 22, 32, 0.85)",
+        font={"color": "#edf4fb"},
+        height=420,
+        margin={"l": 16, "r": 16, "t": 18, "b": 18},
         xaxis_title="Date",
         yaxis_title="AQI",
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0},
@@ -277,14 +542,67 @@ def render_main_chart(history_df: pd.DataFrame, predictions: list[float]) -> Non
     st.plotly_chart(figure, width="stretch")
 
 
-def render_downloads(
+def render_history_chart(history_df: pd.DataFrame) -> None:
+    if history_df.empty:
+        st.info("Historical overview is not available yet.")
+        return
+
+    figure = go.Figure()
+    figure.add_trace(
+        go.Scatter(
+            x=pd.to_datetime(history_df["date"]),
+            y=history_df["pm2_5"],
+            mode="lines",
+            name="PM2.5",
+            line={"width": 3, "color": "#ff9f43"},
+            fill="tozeroy",
+            fillcolor="rgba(255, 159, 67, 0.10)",
+        )
+    )
+    figure.add_trace(
+        go.Scatter(
+            x=pd.to_datetime(history_df["date"]),
+            y=history_df["pm10"],
+            mode="lines",
+            name="PM10",
+            line={"width": 3, "color": "#53d7c2"},
+            fill="tozeroy",
+            fillcolor="rgba(83, 215, 194, 0.08)",
+        )
+    )
+    figure.add_trace(
+        go.Scatter(
+            x=pd.to_datetime(history_df["date"]),
+            y=history_df["aqi_display"],
+            mode="lines+markers",
+            name="AQI",
+            line={"width": 2.5, "color": "#7dd8ff"},
+            marker={"size": 6},
+            yaxis="y2",
+        )
+    )
+    figure.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(11, 22, 32, 0.85)",
+        font={"color": "#edf4fb"},
+        height=420,
+        margin={"l": 16, "r": 16, "t": 18, "b": 18},
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0},
+        xaxis_title="Date",
+        yaxis={"title": "Pollutants"},
+        yaxis2={"title": "AQI", "overlaying": "y", "side": "right"},
+    )
+    st.plotly_chart(figure, width="stretch")
+
+
+def build_report_df(
     today_prediction: float | None,
     today_date: str | None,
     predictions: list[float],
     forecast_dates: list[str],
-) -> None:
+) -> pd.DataFrame:
     timeline_values = [today_prediction, *predictions]
-    report_df = pd.DataFrame(
+    return pd.DataFrame(
         {
             "Window": ["Today confirmation", "Forecast day 1", "Forecast day 2", "Forecast day 3"],
             "Date": [today_date, *forecast_dates],
@@ -293,14 +611,6 @@ def render_downloads(
             "Health Recommendation": [health_recommendation(value) for value in timeline_values],
         }
     )
-    st.dataframe(report_df, width="stretch", hide_index=True)
-    st.download_button(
-        "Download 3-day forecast CSV",
-        report_df.to_csv(index=False).encode("utf-8"),
-        "aqi_3_day_forecast_report.csv",
-        "text/csv",
-        use_container_width=True,
-    )
 
 
 def render_alert_panel(predictions: list[float]) -> None:
@@ -308,15 +618,21 @@ def render_alert_panel(predictions: list[float]) -> None:
     if not alerts:
         return
 
-    hazardous_alerts = [item for item in alerts if item["level"] == "Hazardous"]
-    panel_type = "hazardous" if hazardous_alerts else "unhealthy"
-    headline = "Hazardous AQI Alert" if hazardous_alerts else "Air Quality Alert"
+    levels = {item["level"] for item in alerts}
+    if "Hazardous" in levels:
+        panel_type = "hazardous"
+        headline = "Hazardous AQI Alert"
+        guidance = "Avoid outdoor activity, keep windows closed, and use a mask if travel is unavoidable."
+    elif "Unhealthy" in levels:
+        panel_type = "unhealthy"
+        headline = "Severe Air Quality Alert"
+        guidance = "Limit time outdoors, especially for children, seniors, and anyone with respiratory sensitivity."
+    else:
+        panel_type = "sensitive"
+        headline = "Health Precaution"
+        guidance = "Sensitive groups should consider reducing prolonged outdoor exertion."
+
     days_text = ", ".join(f"{item['day']} ({item['aqi']:.1f})" for item in alerts)
-    guidance = (
-        "Avoid outdoor activity, keep windows closed, and use protective masks if travel is necessary."
-        if hazardous_alerts
-        else "Sensitive groups should reduce outdoor exposure and monitor conditions closely."
-    )
     st.markdown(
         f"""
         <div class="alert-panel {panel_type}">
@@ -330,8 +646,28 @@ def render_alert_panel(predictions: list[float]) -> None:
     )
 
 
+def render_health_guide() -> None:
+    guide_rows = [
+        ("#56d486", "Good (0-50): Air quality is satisfactory and outdoor activity is generally safe."),
+        ("#f4d35e", "Moderate (51-100): Sensitive groups should reduce prolonged outdoor exertion."),
+        ("#ff9f43", "Sensitive (101-150): Children, seniors, and sensitive groups should limit outdoor time."),
+        ("#ff6b6b", "Unhealthy (151-200): Reduce outdoor exposure and use a mask when necessary."),
+        ("#791b1b", "Hazardous (201+): Avoid prolonged outdoor activity and stay indoors when possible."),
+    ]
+    for color, text in guide_rows:
+        st.markdown(
+            f"""
+            <div class="guide-row">
+                <span class="guide-dot" style="background:{color};"></span>
+                <span>{text}</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
 def main() -> None:
-    st.set_page_config(page_title="AQI Forecast Studio", layout="wide")
+    st.set_page_config(page_title="AQI Forecast Studio", layout="wide", initial_sidebar_state="expanded")
     inject_styles()
 
     try:
@@ -345,12 +681,31 @@ def main() -> None:
     model_options = get_available_model_options()
 
     with st.sidebar:
-        st.markdown("## Forecast Controls")
+        st.markdown(
+            """
+            <div style="margin-top:0.25rem; margin-bottom:1rem;">
+                <div class="eyebrow">AQI Forecast Studio</div>
+                <div style="font-family:'Space Grotesk',sans-serif; font-size:2rem; font-weight:700; line-height:1.04; margin-top:0.4rem;">
+                    Air Quality
+                    <div style="color:#7dd8ff;">Karachi Intelligence</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        render_sidebar_panel(
+            "About",
+            "Sun",
+            "Real-time Karachi air-quality monitoring and next 3 days forecasting powered by a production-ready ensemble of ML models.",
+        )
+
+        st.markdown("### Forecast Controls")
         model_name = st.selectbox("Model strategy", model_options, index=0)
-        if st.button("Generate forecast", width="stretch"):
+        if st.button("Generate Forecast", width="stretch"):
             clear_caches()
             st.rerun()
-        if st.button("Reload data", width="stretch"):
+        if st.button("Reload Data", width="stretch"):
             clear_caches()
             st.rerun()
 
@@ -375,14 +730,27 @@ def main() -> None:
                 value=float(current_value),
             )
 
-        st.markdown("---")
-        st.markdown("### Status")
-        if backend_status["mongo_available"]:
-            st.success("MongoDB connected")
-        else:
-            st.warning("Using local fallback data")
-        st.caption(f"Timezone: {TIMEZONE}")
-        st.caption(f"Models: {', '.join(available_models) if available_models else 'Local fallback only'}")
+        mongo_status = "Active" if backend_status["mongo_available"] else "Fallback mode"
+        render_sidebar_panel(
+            "System Status",
+            "Control",
+            f"Status: <b>{mongo_status}</b><br>Timezone: <b>{TIMEZONE}</b><br>Latest sync: <b>{format_timestamp(latest_row.get('timestamp'))}</b>",
+        )
+        render_sidebar_panel(
+            "Technical Specs",
+            "Bars",
+            "Feature cadence: hourly<br>"
+            "Training cadence: daily<br>"
+            f"Models online: <b>{', '.join(available_models) if available_models else 'Local fallback only'}</b>",
+        )
+        render_sidebar_panel(
+            "Data Sources",
+            "Globe",
+            "Primary: OpenWeather historical air-pollution API<br>"
+            "Fallback: Open-Meteo air-quality feed<br>"
+            "Registry: MongoDB Atlas feature store and model registry",
+        )
+        st.caption(f"Designed by {AUTHOR_NAME}")
 
     selected_model = None if model_name == "Best Available" else model_name
     try:
@@ -400,100 +768,278 @@ def main() -> None:
     leaderboard = forecast["leaderboard"] or get_model_leaderboard()
     history_df = get_recent_daily_history()
     current_observed_aqi, current_source = get_current_aqi()
+    explainability_assets = explainability_images()
 
     observed_level, observed_color = aqi_level_and_color(current_observed_aqi)
     forecast_level, forecast_color = aqi_level_and_color(predicted_today_aqi)
-    delta_text = "Current and forecast are close"
+    delta_text = "Current and forecast are closely aligned."
     if current_observed_aqi is not None and predicted_today_aqi is not None:
         delta = predicted_today_aqi - current_observed_aqi
         if delta > 5:
-            delta_text = f"Forecast is {delta:.1f} AQI above current"
+            delta_text = f"Forecast is {delta:.1f} AQI above current conditions."
         elif delta < -5:
-            delta_text = f"Forecast is {abs(delta):.1f} AQI below current"
+            delta_text = f"Forecast is {abs(delta):.1f} AQI below current conditions."
+
+    reliability = leaderboard[0] if leaderboard else None
+    reliability_text = f"RMSE {float(reliability['rmse']):.2f}" if reliability else "Metrics unavailable"
+    forecast_signal = sum(next_three_day_predictions) / len(next_three_day_predictions) if next_three_day_predictions else 0.0
+    report_df = build_report_df(predicted_today_aqi, today_date, next_three_day_predictions, next_three_day_dates)
 
     st.markdown(
         f"""
-        <div class="hero-card">
-            <div class="eyebrow">AQI Forecast Studio</div>
-            <div class="hero-title">{DEFAULT_CITY} Air Quality Predictor</div>
+        <div class="hero-shell">
+            <div class="eyebrow">Karachi AQI Forecasting</div>
+            <div class="hero-title">Air Quality, tuned for clarity.</div>
             <div class="hero-copy">
-                A clean forecast view focused on what matters most: current AQI, today's predicted AQI
-                for confirmation, the next 3 days, and a quick health decision guide.
+                A cinematic monitoring dashboard for Karachi that blends live observed AQI, today's model confirmation,
+                and a polished 72-hour outlook powered by production ML pipelines.
             </div>
-            <div class="signature">Designed by {AUTHOR_NAME}</div>
+            <div class="hero-meta">Lead operator: {AUTHOR_NAME} | Best model live: {best_model}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
+    action_cols = st.columns([1.1, 1.1, 4.2])
+    with action_cols[0]:
+        if st.button("Refresh Forecast", width="stretch", key="hero_refresh_forecast"):
+            clear_caches()
+            st.rerun()
+    with action_cols[1]:
+        if st.button("Sync Data", width="stretch", key="hero_sync_data"):
+            clear_caches()
+            st.rerun()
+    with action_cols[2]:
+        st.markdown(
+            '<div class="status-pill">Deployment mode: '
+            + ("MongoDB connected" if backend_status["mongo_available"] else "Local fallback active")
+            + "</div>",
+            unsafe_allow_html=True,
+        )
+
     if not backend_status["mongo_available"]:
         fallback_note = backend_status.get("local_feature_timestamp")
-        fallback_text = f" Latest local feature timestamp: {format_timestamp(fallback_note)}." if fallback_note else ""
+        fallback_text = f"Latest local feature timestamp: {format_timestamp(fallback_note)}." if fallback_note else ""
         st.markdown(
-            f'<div class="callout"><b>Fallback mode:</b> MongoDB is unavailable, so the dashboard is using local artifacts.{fallback_text}</div>',
+            f"""
+            <div class="panel-card" style="margin-top:0.95rem; border-left:5px solid #f4d35e;">
+                <div class="metric-label">Fallback Mode</div>
+                <div class="panel-copy">MongoDB is unavailable, so the dashboard is serving local artifacts. {fallback_text}</div>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
 
     render_alert_panel(predictions)
 
-    top_cols = st.columns(3)
-    with top_cols[0]:
-        observed_text = f"{current_observed_aqi:.1f}" if current_observed_aqi is not None else "N/A"
-        observed_subtext = f"{observed_level} - Source: {current_source}"
+    headline_left, headline_right = st.columns([1.45, 1.0], gap="large")
+    with headline_left:
         st.markdown(
-            render_metric_card("Current Observed AQI", observed_text, observed_subtext, observed_color),
+            render_observed_hero(
+                current_observed_aqi,
+                observed_level,
+                observed_color,
+                current_source,
+                latest_row.get("timestamp"),
+            ),
             unsafe_allow_html=True,
         )
-    with top_cols[1]:
+    with headline_right:
         st.markdown(
             render_metric_card(
                 "Predicted AQI Today",
                 f"{predicted_today_aqi:.1f}",
-                f"{forecast_level} - Confirmation signal",
+                f"{forecast_level} | Confirmation signal",
                 forecast_color,
             ),
             unsafe_allow_html=True,
         )
-    with top_cols[2]:
-        reliability = leaderboard[0] if leaderboard else None
-        reliability_text = f"RMSE {float(reliability['rmse']):.2f}" if reliability else "Metrics unavailable"
-        forecast_signal = sum(next_three_day_predictions) / len(next_three_day_predictions) if next_three_day_predictions else 0.0
         st.markdown(
             render_metric_card(
                 "Forecast Signal",
                 f"{forecast_signal:.1f}",
-                f"{delta_text} - {reliability_text}",
-                "#59c3c3",
+                f"{delta_text} | {reliability_text}",
+                "#53d7c2",
+            ),
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            render_metric_card(
+                "Production Lead",
+                best_model,
+                f"Top available model in the latest leaderboard. {reliability_text}.",
+                "#7dd8ff",
             ),
             unsafe_allow_html=True,
         )
 
-    st.markdown('<div class="section-title">3-Day Forecast</div>', unsafe_allow_html=True)
-    st.caption("Today's model prediction is shown above for confirmation. The forecast below covers the next 3 days.")
+    st.markdown('<div class="section-title">3-Day Forecast Outlook</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-copy">Today\'s model prediction is shown above for confirmation. '
+        'The forecast cards below cover the next 3 days only.</div>',
+        unsafe_allow_html=True,
+    )
     render_forecast_cards(next_three_day_predictions, next_three_day_dates)
 
     st.markdown('<div class="section-title">Observed vs Forecast</div>', unsafe_allow_html=True)
-    render_main_chart(history_df, predictions)
+    st.markdown(
+        '<div class="section-copy">A compact trend view showing recent daily AQI behavior against the next 72-hour forecast window.</div>',
+        unsafe_allow_html=True,
+    )
+    render_forecast_chart(history_df, predictions)
 
-    lower_left, lower_right = st.columns([1.2, 1.0])
-    with lower_left:
-        st.markdown('<div class="section-title">Health Guidance</div>', unsafe_allow_html=True)
-        st.markdown(
-            f"""
-            <div class="card">
-                <div class="label">What this means</div>
-                <div class="subtext" style="font-size:1rem;">{health_recommendation(predicted_today_aqi)}</div>
-                <div class="subtext" style="margin-top:0.8rem;">
-                    Best model: <b>{best_model}</b><br>
-                    Feature snapshot: <b>{format_timestamp(latest_row.get("timestamp"))}</b>
+    tab_forecast, tab_history, tab_models, tab_health = st.tabs(
+        ["Detailed Report", "Historical Overview", "Model Insights", "Health Guidance"]
+    )
+
+    with tab_forecast:
+        left_col, right_col = st.columns([1.2, 1.0], gap="large")
+        with left_col:
+            st.markdown(
+                """
+                <div class="panel-card">
+                    <div class="metric-label">Forecast Manifest</div>
+                    <div class="panel-copy">
+                        This export combines today's model confirmation with the next 3 forecast days and their AQI risk categories.
+                    </div>
                 </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with lower_right:
-        st.markdown('<div class="section-title">Download Report</div>', unsafe_allow_html=True)
-        render_downloads(predicted_today_aqi, today_date, next_three_day_predictions, next_three_day_dates)
+                """,
+                unsafe_allow_html=True,
+            )
+            st.dataframe(report_df, width="stretch", hide_index=True)
+        with right_col:
+            st.markdown(
+                """
+                <div class="panel-card">
+                    <div class="metric-label">Download Pack</div>
+                    <div class="panel-copy">
+                        Export a lightweight forecast report for presentation, reporting, or monitoring handoff.
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.download_button(
+                "Download 3-day forecast CSV",
+                report_df.to_csv(index=False).encode("utf-8"),
+                "aqi_3_day_forecast_report.csv",
+                "text/csv",
+                use_container_width=True,
+            )
+            st.markdown(
+                render_metric_card(
+                    "Health Snapshot",
+                    forecast_level,
+                    health_recommendation(predicted_today_aqi),
+                    forecast_color,
+                ),
+                unsafe_allow_html=True,
+            )
+
+    with tab_history:
+        stat_cols = st.columns(4)
+        if not history_df.empty:
+            avg_aqi = history_df["aqi_display"].mean()
+            avg_pm25 = history_df["pm2_5"].mean()
+            avg_pm10 = history_df["pm10"].mean()
+            peak_aqi = history_df["aqi_display"].max()
+        else:
+            avg_aqi = avg_pm25 = avg_pm10 = peak_aqi = 0.0
+        history_stats = [
+            ("Avg AQI", f"{avg_aqi:.1f}", "Recent daily average"),
+            ("Peak AQI", f"{peak_aqi:.1f}", "Recent daily maximum"),
+            ("Avg PM2.5", f"{avg_pm25:.1f}", "Recent particulate load"),
+            ("Avg PM10", f"{avg_pm10:.1f}", "Recent coarse particulate load"),
+        ]
+        for column, (label, value, subtext) in zip(stat_cols, history_stats):
+            with column:
+                st.markdown(render_metric_card(label, value, subtext, "#f4d35e"), unsafe_allow_html=True)
+        render_history_chart(history_df)
+
+    with tab_models:
+        insight_left, insight_right = st.columns([1.0, 1.2], gap="large")
+        with insight_left:
+            st.markdown(
+                render_metric_card(
+                    "Best Model Selection",
+                    best_model,
+                    f"Selected from the live leaderboard. {reliability_text}.",
+                    "#7dd8ff",
+                ),
+                unsafe_allow_html=True,
+            )
+            leaderboard_df = pd.DataFrame(leaderboard)
+            if not leaderboard_df.empty:
+                leaderboard_df = leaderboard_df.rename(
+                    columns={
+                        "model": "Model",
+                        "rmse": "RMSE",
+                        "mae": "MAE",
+                        "r2": "R2",
+                        "fit_status": "Fit Status",
+                        "selection_score": "Selection Score",
+                    }
+                )
+                st.dataframe(leaderboard_df, width="stretch", hide_index=True)
+            else:
+                st.info("No leaderboard metadata is available.")
+        with insight_right:
+            st.markdown(
+                """
+                <div class="panel-card">
+                    <div class="metric-label">Model and Explainability Assets</div>
+                    <div class="panel-copy">
+                        SHAP and LIME outputs are surfaced below when they are available in the reports directory.
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            if explainability_assets:
+                image_cols = st.columns(2)
+                for index, (name, path) in enumerate(explainability_assets.items()):
+                    with image_cols[index % 2]:
+                        st.image(str(path), caption=name.replace("_", " ").title(), use_container_width=True)
+            else:
+                st.info("Explainability images are not available in this deployment.")
+
+    with tab_health:
+        left_col, right_col = st.columns([0.95, 1.15], gap="large")
+        with left_col:
+            st.markdown(
+                """
+                <div class="panel-card">
+                    <div class="metric-label">Comprehensive Health Guidance</div>
+                    <div class="panel-copy">
+                        AQI risk is translated into practical guidance for public safety, especially for sensitive groups.
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            render_health_guide()
+        with right_col:
+            st.markdown(
+                render_metric_card(
+                    "Current Recommendation",
+                    forecast_level,
+                    health_recommendation(predicted_today_aqi),
+                    forecast_color,
+                ),
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                """
+                <div class="panel-card">
+                    <div class="metric-label">Operational Notes</div>
+                    <div class="panel-copy">
+                        Alerts are generated from the forecast horizon, not only from the currently observed reading.
+                        This helps the dashboard surface tomorrow's risk before conditions visibly peak.
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
     st.markdown("---")
     st.caption(f"Rendered on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | {AUTHOR_NAME}")
