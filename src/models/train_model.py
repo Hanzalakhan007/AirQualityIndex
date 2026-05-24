@@ -51,31 +51,8 @@ os.makedirs("reports", exist_ok=True)
 
 print("Starting Machine Learning Pipeline...")
 
-
-def _load_local_training_data() -> pd.DataFrame | None:
-    local_features = PROCESSED_DIR / "features.csv"
-    if not local_features.exists():
-        return None
-    print(f"Loading training data from local fallback file '{local_features}'...")
-    dataframe = pd.read_csv(local_features)
-    return dataframe.sort_values("timestamp").reset_index(drop=True)
-
-
-def _snapshot_signature(dataframe: pd.DataFrame) -> tuple[pd.Timestamp | None, int, int]:
-    if dataframe.empty:
-        return None, 0, 0
-    latest_timestamp = None
-    if "timestamp" in dataframe.columns:
-        timestamps = pd.to_datetime(dataframe["timestamp"], errors="coerce")
-        if not timestamps.dropna().empty:
-            latest_timestamp = timestamps.max()
-    feature_coverage = sum(1 for column in FEATURE_COLUMNS if column in dataframe.columns)
-    return latest_timestamp, feature_coverage, len(dataframe)
-
-
 def load_training_data() -> pd.DataFrame:
-    """Load processed features from MongoDB, preferring fresher local fallback data when needed."""
-    local_dataframe = _load_local_training_data()
+    """Load processed features from MongoDB, with a local CSV fallback."""
     try:
         print("Connecting to MongoDB feature store...")
         client = create_verified_mongo_client()
@@ -83,37 +60,20 @@ def load_training_data() -> pd.DataFrame:
         print(f"Fetching features from collection '{MONGO_DB_NAME}.{MONGO_FEATURES_COLLECTION}'...")
         rows = list(collection.find({}, {"_id": 0}).sort("timestamp", 1))
         if rows:
-            mongo_dataframe = pd.DataFrame(rows).sort_values("timestamp").reset_index(drop=True)
-            if local_dataframe is not None:
-                mongo_latest, mongo_feature_count, mongo_row_count = _snapshot_signature(mongo_dataframe)
-                local_latest, local_feature_count, local_row_count = _snapshot_signature(local_dataframe)
-                local_is_fresher = (
-                    local_latest is not None
-                    and (mongo_latest is None or local_latest > mongo_latest)
-                )
-                local_is_richer = local_feature_count > mongo_feature_count
-                local_is_larger_same_horizon = (
-                    local_latest is not None
-                    and mongo_latest is not None
-                    and local_latest == mongo_latest
-                    and local_row_count > mongo_row_count
-                )
-                if local_is_fresher or local_is_richer or local_is_larger_same_horizon:
-                    print(
-                        "Local fallback feature file is newer or has richer engineered features than the MongoDB "
-                        "snapshot. Using local training data for this run."
-                    )
-                    return local_dataframe
-            return mongo_dataframe
+            dataframe = pd.DataFrame(rows)
+            return dataframe.sort_values("timestamp").reset_index(drop=True)
     except Exception as exc:
         print(f"MongoDB training-data load failed, falling back to local CSV: {exc}")
 
-    if local_dataframe is None:
+    local_features = PROCESSED_DIR / "features.csv"
+    if not local_features.exists():
         raise RuntimeError(
             "MongoDB feature collection is unavailable and no local fallback feature file was found. "
             "Run `python scripts/feature_pipeline.py` first."
         )
-    return local_dataframe
+    print(f"Loading training data from local fallback file '{local_features}'...")
+    dataframe = pd.read_csv(local_features)
+    return dataframe.sort_values("timestamp").reset_index(drop=True)
 
 
 def get_target_series(dataframe: pd.DataFrame) -> pd.Series:
