@@ -27,14 +27,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install --no-cache-dir -r requirements.txt
 
-      - name: Run hourly feature + training pipeline
+      - name: Run hourly feature pipeline
         env:
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
           MONGO_URI: ${{ secrets.MONGO_URI }}
           MONGO_DB_NAME: ${{ secrets.MONGO_DB_NAME }}
           MONGO_FEATURES_COLLECTION: ${{ secrets.MONGO_FEATURES_COLLECTION }}
-          MONGO_MODEL_REGISTRY_COLLECTION: ${{ secrets.MONGO_MODEL_REGISTRY_COLLECTION }}
-          MONGO_MODEL_BUCKET: ${{ secrets.MONGO_MODEL_BUCKET }}
           MONGO_PIPELINE_CONTROL_COLLECTION: ${{ secrets.MONGO_PIPELINE_CONTROL_COLLECTION }}
           PIPELINE_FORCE_RUN: ${{ github.event_name == 'workflow_dispatch' }}
         run: python scripts/run_hourly_pipeline.py

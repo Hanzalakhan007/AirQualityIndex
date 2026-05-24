@@ -1,16 +1,89 @@
-name: Deployment Template
+name: Deployment Verification
 
 on:
+  push:
+    branches: [ main ]
   workflow_dispatch:
 
+concurrency:
+  group: production-deployment-verification
+  cancel-in-progress: true
+
 jobs:
-  deploy:
+  deployment-config:
     runs-on: ubuntu-latest
-
+    outputs:
+      has_streamlit_url: ${{ steps.flags.outputs.has_streamlit_url }}
+      has_api_url: ${{ steps.flags.outputs.has_api_url }}
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Deployment notes
+      - name: Resolve configured deployment targets
+        id: flags
+        env:
+          STREAMLIT_APP_URL: ${{ secrets.STREAMLIT_APP_URL }}
+          API_HEALTHCHECK_URL: ${{ secrets.API_HEALTHCHECK_URL }}
         run: |
-          echo "Connect this repository to Streamlit Cloud and point the app to app.py."
-          echo "If you want API hosting too, deploy app/api.py with your preferred Python host."
+          if [ -n "$STREAMLIT_APP_URL" ]; then
+            echo "has_streamlit_url=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_streamlit_url=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ -n "$API_HEALTHCHECK_URL" ]; then
+            echo "has_api_url=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_api_url=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Warn when deployment targets are not configured
+        if: ${{ steps.flags.outputs.has_streamlit_url != 'true' && steps.flags.outputs.has_api_url != 'true' }}
+        run: |
+          echo "::warning::No deployment verification targets configured. Set STREAMLIT_APP_URL and optionally API_HEALTHCHECK_URL in GitHub Actions secrets."
+
+  verify-streamlit-dashboard:
+    needs: deployment-config
+    if: ${{ needs.deployment-config.outputs.has_streamlit_url == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for Streamlit Cloud to pick up the latest push
+        run: sleep 90
+
+      - name: Verify Streamlit dashboard is reachable
+        env:
+          STREAMLIT_APP_URL: ${{ secrets.STREAMLIT_APP_URL }}
+        run: |
+          attempts=15
+          delay=20
+          for attempt in $(seq 1 "$attempts"); do
+            status_code=$(curl -L -s -o response.html -w "%{http_code}" "$STREAMLIT_APP_URL")
+            if [ "$status_code" = "200" ] && grep -qi "streamlit\|aqi\|karachi" response.html; then
+              echo "Streamlit dashboard is live at $STREAMLIT_APP_URL"
+              exit 0
+            fi
+            echo "Attempt $attempt/$attempts: dashboard not ready yet (HTTP $status_code). Retrying in ${delay}s..."
+            sleep "$delay"
+          done
+          echo "::error::Streamlit dashboard did not become reachable at $STREAMLIT_APP_URL"
+          exit 1
+
+  verify-api-health:
+    needs: deployment-config
+    if: ${{ needs.deployment-config.outputs.has_api_url == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify deployed API health endpoint
+        env:
+          API_HEALTHCHECK_URL: ${{ secrets.API_HEALTHCHECK_URL }}
+        run: |
+          attempts=15
+          delay=10
+          for attempt in $(seq 1 "$attempts"); do
+            body=$(curl -L -s "$API_HEALTHCHECK_URL")
+            if echo "$body" | grep -qi '"status"[[:space:]]*:[[:space:]]*"ok"'; then
+              echo "API healthcheck is live at $API_HEALTHCHECK_URL"
+              exit 0
+            fi
+            echo "Attempt $attempt/$attempts: API not healthy yet. Retrying in ${delay}s..."
+            sleep "$delay"
+          done
+          echo "::error::API healthcheck did not return status ok at $API_HEALTHCHECK_URL"
+          exit 1

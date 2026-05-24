@@ -1,4 +1,4 @@
-"""Run the full hourly pipeline with a once-per-hour lease in MongoDB."""
+"""Run the hourly feature pipeline with a once-per-hour lease in MongoDB."""
 from __future__ import annotations
 
 import os
@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
-PIPELINE_KEY = "hourly_training_pipeline"
+PIPELINE_KEY = "hourly_feature_pipeline"
 
 sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -94,8 +94,7 @@ if __name__ == "__main__":
         raise SystemExit(0)
 
     try:
-        for script in ("feature_pipeline.py", "training_pipeline.py"):
-            run_script(script)
+        run_script("feature_pipeline.py")
     except subprocess.CalledProcessError as exc:
         try:
             mark_pipeline_status("failed", slot_start, str(exc))

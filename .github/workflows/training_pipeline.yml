@@ -23,12 +23,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install --no-cache-dir -r requirements.txt
 
-      - name: Build features and train models
+      - name: Train models from the latest feature store snapshot
         env:
-          OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
           MONGO_URI: ${{ secrets.MONGO_URI }}
           MONGO_DB_NAME: ${{ secrets.MONGO_DB_NAME }}
           MONGO_FEATURES_COLLECTION: ${{ secrets.MONGO_FEATURES_COLLECTION }}
           MONGO_MODEL_REGISTRY_COLLECTION: ${{ secrets.MONGO_MODEL_REGISTRY_COLLECTION }}
           MONGO_MODEL_BUCKET: ${{ secrets.MONGO_MODEL_BUCKET }}
-        run: python scripts/master_pipeline.py
+        run: python scripts/training_pipeline.py

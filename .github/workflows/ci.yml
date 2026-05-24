@@ -30,6 +30,4 @@ jobs:
         run: ruff check .
 
       - name: Run prediction smoke test
-        env:
-          HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
         run: python verify_prediction.py
