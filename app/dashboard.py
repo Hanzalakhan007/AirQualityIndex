@@ -690,10 +690,10 @@ def main() -> None:
         st.markdown(
             """
             <div style="margin-top:0.25rem; margin-bottom:1rem;">
-                <div class="eyebrow">AQI Forecast Studio</div>
+                <div class="eyebrow">Real-Time AQI Forecasting</div>
                 <div style="font-family:'Space Grotesk',sans-serif; font-size:2rem; font-weight:700; line-height:1.04; margin-top:0.4rem;">
-                    Karachi AQI
-                    <div style="color:#7dd8ff;">Forecast Studio</div>
+                    Karachi
+                    <div style="color:#7dd8ff;">AirWatch</div>
                 </div>
             </div>
             """,
