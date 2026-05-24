@@ -1,7 +1,8 @@
 """Streamlit dashboard for AQI forecasting."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -50,7 +51,11 @@ def format_timestamp(value: object) -> str:
     if value is None:
         return "Unknown time"
     try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).strftime("%b %d, %Y %I:%M %p")
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        localized = parsed.astimezone(ZoneInfo(TIMEZONE))
+        return localized.strftime("%b %d, %Y %I:%M %p")
     except ValueError:
         return str(value)
 
@@ -467,7 +472,7 @@ def render_observed_hero(
             <div class="observed-band" style="color:{observed_color};">{observed_level}</div>
             <div class="panel-copy" style="margin-top:1rem;">
                 Live reading source: <b>{current_source}</b><br>
-                Latest feature sync: <b>{format_timestamp(latest_timestamp)}</b>
+                Latest source timestamp: <b>{format_timestamp(latest_timestamp)} {TIMEZONE}</b>
             </div>
             <div class="status-pill">Karachi stream | {TIMEZONE}</div>
         </div>
@@ -734,7 +739,7 @@ def main() -> None:
         render_sidebar_panel(
             "System Status",
             "Control",
-            f"Status: <b>{mongo_status}</b><br>Timezone: <b>{TIMEZONE}</b><br>Latest sync: <b>{format_timestamp(latest_row.get('timestamp'))}</b>",
+            f"Status: <b>{mongo_status}</b><br>Timezone: <b>{TIMEZONE}</b><br>Latest source timestamp: <b>{format_timestamp(latest_row.get('timestamp'))} {TIMEZONE}</b>",
         )
         render_sidebar_panel(
             "Technical Specs",
