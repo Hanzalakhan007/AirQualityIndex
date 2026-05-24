@@ -20,7 +20,11 @@ from config.settings import (  # noqa: E402
     MONGO_DB_NAME,
     MONGO_PIPELINE_CONTROL_COLLECTION,
 )
-from src.mongo import create_verified_mongo_client  # noqa: E402
+from src.mongo import (  # noqa: E402
+    create_verified_mongo_client,
+    format_mongo_space_quota_error,
+    is_mongo_space_quota_error,
+)
 
 load_dotenv()
 
@@ -79,7 +83,12 @@ def run_script(script_name: str) -> None:
 
 if __name__ == "__main__":
     force_run = os.getenv("PIPELINE_FORCE_RUN", "").lower() in {"1", "true", "yes"}
-    claimed, slot_start = claim_hourly_slot(force_run=force_run)
+    try:
+        claimed, slot_start = claim_hourly_slot(force_run=force_run)
+    except Exception as exc:
+        if is_mongo_space_quota_error(exc):
+            raise SystemExit(format_mongo_space_quota_error(exc)) from exc
+        raise
     if not claimed:
         print(f"Hourly pipeline already claimed for slot {slot_start.isoformat()}; skipping.")
         raise SystemExit(0)
@@ -88,7 +97,19 @@ if __name__ == "__main__":
         for script in ("feature_pipeline.py", "training_pipeline.py"):
             run_script(script)
     except subprocess.CalledProcessError as exc:
-        mark_pipeline_status("failed", slot_start, str(exc))
+        try:
+            mark_pipeline_status("failed", slot_start, str(exc))
+        except Exception as status_exc:
+            if is_mongo_space_quota_error(status_exc):
+                print(format_mongo_space_quota_error(status_exc))
+            else:
+                print(f"Unable to record failed pipeline status in MongoDB: {status_exc}")
         raise
     else:
-        mark_pipeline_status("completed", slot_start)
+        try:
+            mark_pipeline_status("completed", slot_start)
+        except Exception as status_exc:
+            if is_mongo_space_quota_error(status_exc):
+                print(format_mongo_space_quota_error(status_exc))
+            else:
+                print(f"Unable to record completed pipeline status in MongoDB: {status_exc}")

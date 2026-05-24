@@ -53,5 +53,7 @@ src/                    Core data science code
 ## Notes
 
 - The dashboard and API read features and model artifacts from MongoDB at runtime.
+- On Atlas free tiers, set `MONGO_MODEL_REGISTRY_MAX_VERSIONS` to keep only the latest few model uploads and avoid filling the cluster with hourly retrains.
+- If the registry has already filled the cluster, run `python scripts/prune_model_registry.py --keep 3` once to free space before rerunning the hourly workflow.
 - `verify_prediction.py` is included as a lightweight smoke test for CI.
 - Existing tracked data and model files are preserved.

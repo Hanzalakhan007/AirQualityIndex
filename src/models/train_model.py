@@ -24,10 +24,12 @@ from config.settings import (
     MONGO_DB_NAME,
     MONGO_FEATURES_COLLECTION,
     MONGO_MODEL_BUCKET,
+    MONGO_MODEL_REGISTRY_MAX_VERSIONS,
     MONGO_MODEL_REGISTRY_COLLECTION,
     SCALER_REGISTRY_FILENAME,
     SCALER_REGISTRY_NAME,
 )
+from src.model_registry import ensure_model_registry_indexes, prune_model_registry_versions
 from src.mongo import create_verified_mongo_client
 from src.schema import FEATURE_COLUMNS
 
@@ -252,6 +254,7 @@ def serialize_joblib_artifact(artifact) -> bytes:
 
 
 def save_registry_artifact(
+    database,
     registry_name: str,
     filename: str,
     model_kind: str,
@@ -259,10 +262,15 @@ def save_registry_artifact(
     metrics: dict[str, float | str | int],
     label: str | None = None,
 ) -> None:
-    client = create_verified_mongo_client()
-    database = client[MONGO_DB_NAME]
     registry = database[MONGO_MODEL_REGISTRY_COLLECTION]
     bucket = GridFSBucket(database, bucket_name=MONGO_MODEL_BUCKET)
+    ensure_model_registry_indexes(database)
+    if MONGO_MODEL_REGISTRY_MAX_VERSIONS > 0:
+        prune_model_registry_versions(
+            database,
+            registry_name,
+            keep_versions=max(0, MONGO_MODEL_REGISTRY_MAX_VERSIONS - 1),
+        )
     latest = registry.find_one({"registry_name": registry_name}, sort=[("version", -1)])
     version = int((latest or {}).get("version", 0)) + 1
     file_id = bucket.upload_from_stream(
@@ -287,10 +295,12 @@ def save_registry_artifact(
             "created_at": datetime.now(timezone.utc),
         }
     )
-    registry.create_index([("registry_name", 1), ("version", -1)])
 
 
+mongo_client = None
 try:
+    mongo_client = create_verified_mongo_client()
+    mongo_database = mongo_client[MONGO_DB_NAME]
     model_payloads = {
         "Ridge Regression": serialize_joblib_artifact(ridge),
         "Random Forest": serialize_joblib_artifact(rf),
@@ -299,6 +309,7 @@ try:
     for label, payload in model_payloads.items():
         registry_name, filename, model_kind = MODEL_REGISTRY_NAMES[label]
         save_registry_artifact(
+            database=mongo_database,
             registry_name=registry_name,
             filename=filename,
             model_kind=model_kind,
@@ -307,6 +318,7 @@ try:
             label=label,
         )
     save_registry_artifact(
+        database=mongo_database,
         registry_name=SCALER_REGISTRY_NAME,
         filename=SCALER_REGISTRY_FILENAME,
         model_kind="joblib",
@@ -317,3 +329,6 @@ try:
     print("Successfully uploaded all models and scaler to MongoDB Registry!")
 except Exception as exc:
     print(f"Failed to upload models to MongoDB: {exc}")
+finally:
+    if mongo_client is not None:
+        mongo_client.close()
