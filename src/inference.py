@@ -36,6 +36,7 @@ from config.settings import (
     SCALER_REGISTRY_NAME,
     TIMEZONE,
 )
+from src.models.pytorch_model import load_pytorch_checkpoint, predict_pytorch_model
 from src.mongo import create_verified_mongo_client
 from src.schema import FEATURE_COLUMNS
 
@@ -47,6 +48,7 @@ LOCAL_MODEL_FILES = {
     "Ridge Regression": MODELS_DIR / "ridge_model.pkl",
     "Random Forest": MODELS_DIR / "rf_model.pkl",
     "XGBoost": MODELS_DIR / "xgb_model.pkl",
+    "PyTorch MLP": MODELS_DIR / "pytorch_model.pth",
 }
 LOCAL_SCALER_FILE = MODELS_DIR / SCALER_REGISTRY_FILENAME
 
@@ -218,16 +220,34 @@ def _load_local_models(requested_models: tuple[str, ...] | None = None) -> tuple
         model_path = LOCAL_MODEL_FILES.get(label)
         if model_path is None or not model_path.exists():
             continue
-        models[label] = joblib.load(model_path)
-        metadata.setdefault(
-            label,
-            {
-                "registry_name": MODEL_REGISTRY_NAMES.get(label, ("", "", ""))[0],
-                "metrics": {},
-                "filename": model_path.name,
-                "feature_count": len(FEATURE_COLUMNS),
-            },
-        )
+        registry_entry = MODEL_REGISTRY_NAMES.get(label, ("", "", ""))
+        model_kind = registry_entry[2] if len(registry_entry) > 2 else "joblib"
+        try:
+            if model_kind == "pytorch":
+                model, checkpoint = load_pytorch_checkpoint(model_path)
+                models[label] = model
+                metadata.setdefault(
+                    label,
+                    {
+                        "registry_name": registry_entry[0],
+                        "metrics": {},
+                        "filename": model_path.name,
+                        "feature_count": len(checkpoint.get("feature_names", FEATURE_COLUMNS)),
+                    },
+                )
+                continue
+            models[label] = joblib.load(model_path)
+            metadata.setdefault(
+                label,
+                {
+                    "registry_name": MODEL_REGISTRY_NAMES.get(label, ("", "", ""))[0],
+                    "metrics": {},
+                    "filename": model_path.name,
+                    "feature_count": len(FEATURE_COLUMNS),
+                },
+            )
+        except Exception:
+            continue
 
     if scaler is None:
         raise RuntimeError(
@@ -364,6 +384,7 @@ def load_models(requested_models: tuple[str, ...] | None = None) -> tuple[dict[s
                 continue
 
             registry_name, filename, _model_kind = MODEL_REGISTRY_NAMES[label]
+            model_kind = _model_kind
             document = _latest_registry_document(registry_name)
             if document is None:
                 continue
@@ -374,9 +395,14 @@ def load_models(requested_models: tuple[str, ...] | None = None) -> tuple[dict[s
 
             try:
                 artifact_file.seek(0)
-                model = joblib.load(artifact_file)
+                if model_kind == "pytorch":
+                    model, checkpoint = load_pytorch_checkpoint(artifact_file)
+                else:
+                    model = joblib.load(artifact_file)
+                    checkpoint = {}
             except Exception:
                 model = None
+                checkpoint = {}
 
             if model is None:
                 continue
@@ -387,7 +413,7 @@ def load_models(requested_models: tuple[str, ...] | None = None) -> tuple[dict[s
                 "metrics": document.get("metrics", {}) or {},
                 "version": document.get("version"),
                 "filename": document.get("filename", filename),
-                "feature_count": document.get("feature_count"),
+                "feature_count": document.get("feature_count") or len(checkpoint.get("feature_names", FEATURE_COLUMNS)),
             }
 
         if scaler is not None and models:
@@ -533,7 +559,12 @@ def predict_next_days(model_name: str | None = None, overrides: dict[str, float]
     scaled_input = scaler.transform(aligned_input)
     model = models[selected_model]
 
-    raw_prediction = np.ravel(model.predict(scaled_input))
+    registry_entry = MODEL_REGISTRY_NAMES.get(selected_model, ("", "", "joblib"))
+    model_kind = registry_entry[2] if len(registry_entry) > 2 else "joblib"
+    if model_kind == "pytorch":
+        raw_prediction = np.ravel(predict_pytorch_model(model, scaled_input))
+    else:
+        raw_prediction = np.ravel(model.predict(scaled_input))
 
     predictions = [calibrate_aqi(max(1.0, float(value))) or 0.0 for value in raw_prediction[:4]]
     now_local = datetime.now(ZoneInfo(TIMEZONE))

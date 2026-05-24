@@ -61,6 +61,7 @@ MODEL_REGISTRY_NAMES = {
     "Ridge Regression": ("aqi_ridge_model", "ridge_model.pkl", "joblib"),
     "Random Forest": ("aqi_rf_model", "rf_model.pkl", "joblib"),
     "XGBoost": ("aqi_xgboost_model", "xgb_model.pkl", "joblib"),
+    "PyTorch MLP": ("aqi_pytorch_model", "pytorch_model.pth", "pytorch"),
 }
 
 SCALER_REGISTRY_NAME = "aqi_scaler"

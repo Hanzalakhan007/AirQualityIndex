@@ -1,6 +1,6 @@
 # Air Quality Index Predictor
 
-This project predicts the **next 3 days of AQI** from historical pollution data, engineered time features, and multiple ML models. It uses MongoDB as both the feature store and model registry, plus shared config, an API entrypoint, Streamlit theming, wrapper scripts, and deployment docs.
+This project predicts the **next 3 days of AQI** from historical pollution data, engineered time features, and multiple ML models including a PyTorch MLP. It uses MongoDB as both the feature store and model registry, plus shared config, an API entrypoint, Streamlit theming, wrapper scripts, and deployment docs.
 
 ## What is included
 

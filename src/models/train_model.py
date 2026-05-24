@@ -14,6 +14,9 @@ from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.preprocessing import StandardScaler
+import torch
+from torch import nn
+from torch.utils.data import DataLoader, TensorDataset
 import xgboost as xgb
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -30,10 +33,18 @@ from config.settings import (
     SCALER_REGISTRY_NAME,
 )
 from src.model_registry import ensure_model_registry_indexes, prune_model_registry_versions
+from src.models.pytorch_model import (
+    build_pytorch_model,
+    predict_pytorch_model,
+    save_pytorch_checkpoint,
+    serialize_pytorch_checkpoint,
+)
 from src.mongo import create_verified_mongo_client
 from src.schema import FEATURE_COLUMNS
 
 load_dotenv()
+torch.manual_seed(42)
+np.random.seed(42)
 
 os.makedirs("models", exist_ok=True)
 os.makedirs("reports", exist_ok=True)
@@ -119,17 +130,79 @@ scaler = StandardScaler()
 X_train_scaled = scaler.fit_transform(X_train)
 X_test_scaled = scaler.transform(X_test)
 
+
+def train_pytorch_regressor(X_train_values: np.ndarray, y_train_values: np.ndarray):
+    """Train a lightweight PyTorch regressor with a chronological validation split."""
+    features = np.asarray(X_train_values, dtype=np.float32)
+    targets = np.asarray(y_train_values, dtype=np.float32)
+    split_index = max(1, int(len(features) * 0.85))
+    if split_index >= len(features):
+        split_index = max(1, len(features) - 1)
+
+    train_features, val_features = features[:split_index], features[split_index:]
+    train_targets, val_targets = targets[:split_index], targets[split_index:]
+    if len(val_features) == 0:
+        val_features, val_targets = train_features, train_targets
+
+    train_dataset = TensorDataset(
+        torch.from_numpy(train_features),
+        torch.from_numpy(train_targets),
+    )
+    batch_size = min(64, max(8, len(train_dataset)))
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
+
+    model = build_pytorch_model(features.shape[1])
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-4)
+    loss_fn = nn.SmoothL1Loss()
+
+    best_state = None
+    best_val_loss = float("inf")
+    patience = 10
+    patience_counter = 0
+
+    val_features_tensor = torch.from_numpy(np.asarray(val_features, dtype=np.float32))
+    val_targets_tensor = torch.from_numpy(np.asarray(val_targets, dtype=np.float32))
+
+    for _epoch in range(80):
+        model.train()
+        for batch_features, batch_targets in train_loader:
+            optimizer.zero_grad()
+            predictions = model(batch_features)
+            loss = loss_fn(predictions, batch_targets)
+            loss.backward()
+            optimizer.step()
+
+        model.eval()
+        with torch.no_grad():
+            val_predictions = model(val_features_tensor)
+            val_loss = float(loss_fn(val_predictions, val_targets_tensor).item())
+
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_state = {key: value.detach().clone() for key, value in model.state_dict().items()}
+            patience_counter = 0
+        else:
+            patience_counter += 1
+            if patience_counter >= patience:
+                break
+
+    if best_state is not None:
+        model.load_state_dict(best_state)
+    model.eval()
+    return model
+
+
 baseline_preds = np.tile(
     X_test["aqi_rolling_24"].fillna(X_test["aqi"]).to_numpy().reshape(-1, 1),
     (1, 4),
 )
 
-print("\n[1/3] Training Ridge Regression...")
+print("\n[1/4] Training Ridge Regression...")
 ridge = Ridge(alpha=1.0)
 ridge.fit(X_train_scaled, y_train)
 ridge_preds = ridge.predict(X_test_scaled)
 
-print("[2/3] Training Random Forest...")
+print("[2/4] Training Random Forest...")
 rf = RandomForestRegressor(
     n_estimators=300,
     max_depth=10,
@@ -140,7 +213,7 @@ rf = RandomForestRegressor(
 rf.fit(X_train_scaled, y_train)
 rf_preds = rf.predict(X_test_scaled)
 
-print("[3/3] Training XGBoost (Multi-Output)...")
+print("[3/4] Training XGBoost (Multi-Output)...")
 xgb_base = xgb.XGBRegressor(
     n_estimators=250,
     max_depth=3,
@@ -153,6 +226,10 @@ xgb_base = xgb.XGBRegressor(
 xgb_model = MultiOutputRegressor(xgb_base)
 xgb_model.fit(X_train_scaled, y_train)
 xgb_preds = xgb_model.predict(X_test_scaled)
+
+print("[4/4] Training PyTorch MLP...")
+pytorch_model = train_pytorch_regressor(X_train_scaled, y_train.to_numpy())
+pytorch_preds = predict_pytorch_model(pytorch_model, X_test_scaled)
 
 print("\n" + "=" * 40)
 print("MODEL EVALUATION RESULTS (Test Set Average across Today + Next 3 Days)")
@@ -187,12 +264,14 @@ results = {
     "Ridge Regression": evaluate("Ridge Regression", y_test, ridge_preds),
     "Random Forest": evaluate("Random Forest", y_test, rf_preds),
     "XGBoost": evaluate("XGBoost", y_test, xgb_preds),
+    "PyTorch MLP": evaluate("PyTorch MLP", y_test, pytorch_preds),
 }
 
 train_predictions = {
     "Ridge Regression": ridge.predict(X_train_scaled),
     "Random Forest": rf.predict(X_train_scaled),
     "XGBoost": xgb_model.predict(X_train_scaled),
+    "PyTorch MLP": predict_pytorch_model(pytorch_model, X_train_scaled),
 }
 for model_name, predictions in train_predictions.items():
     train_metrics = score_predictions(y_train, predictions)
@@ -233,6 +312,7 @@ pd.DataFrame(
 joblib.dump(ridge, "models/ridge_model.pkl")
 joblib.dump(rf, "models/rf_model.pkl")
 joblib.dump(xgb_model, "models/xgb_model.pkl")
+save_pytorch_checkpoint("models/pytorch_model.pth", pytorch_model, X_train.shape[1], available_features)
 joblib.dump(scaler, "models/scaler.pkl")
 print("Saved refreshed local model artifacts in the 'models' folder.")
 
@@ -305,6 +385,7 @@ try:
         "Ridge Regression": serialize_joblib_artifact(ridge),
         "Random Forest": serialize_joblib_artifact(rf),
         "XGBoost": serialize_joblib_artifact(xgb_model),
+        "PyTorch MLP": serialize_pytorch_checkpoint(pytorch_model, X_train.shape[1], available_features),
     }
     for label, payload in model_payloads.items():
         registry_name, filename, model_kind = MODEL_REGISTRY_NAMES[label]
