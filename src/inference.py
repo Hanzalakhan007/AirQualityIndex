@@ -645,7 +645,7 @@ def get_current_aqi() -> tuple[float | None, str, Any | None]:
                 current_snapshot.get("dt"),
                 tz=ZoneInfo("UTC"),
             ).astimezone(ZoneInfo(TIMEZONE))
-            return calibrate_aqi(current_value), "Current OpenWeather", timestamp
+            return calibrate_aqi(current_value), "OpenWeather", timestamp
 
     latest_row = get_latest_feature_row()
     current_value = normalize_aqi_value(
