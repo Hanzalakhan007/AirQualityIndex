@@ -29,6 +29,7 @@ from config.settings import (
     MONGO_DB_NAME,
     MONGO_FEATURES_COLLECTION,
     MONGO_MODEL_BUCKET,
+    MONGO_PIPELINE_CONTROL_COLLECTION,
     MONGO_MODEL_REGISTRY_COLLECTION,
     OPEN_METEO_AIR_QUALITY,
     PROCESSED_DIR,
@@ -290,6 +291,9 @@ def get_backend_status() -> dict[str, Any]:
         "feature_source": "local_fallback",
         "local_feature_file": str(LOCAL_FEATURES_FILE),
         "local_feature_timestamp": None,
+        "pipeline_last_success_at": None,
+        "pipeline_last_completed_slot": None,
+        "pipeline_status": None,
     }
 
     if LOCAL_FEATURES_FILE.exists():
@@ -308,6 +312,22 @@ def get_backend_status() -> dict[str, Any]:
         status["feature_source"] = "mongodb"
         if latest_row and latest_row.get("timestamp") is not None:
             status["mongo_feature_timestamp"] = str(latest_row["timestamp"])
+        pipeline_doc = database[MONGO_PIPELINE_CONTROL_COLLECTION].find_one(
+            {"_id": "hourly_feature_pipeline"},
+            {
+                "last_success_at": 1,
+                "last_completed_slot": 1,
+                "status": 1,
+                "_id": 0,
+            },
+        )
+        if pipeline_doc:
+            if pipeline_doc.get("last_success_at") is not None:
+                status["pipeline_last_success_at"] = str(pipeline_doc["last_success_at"])
+            if pipeline_doc.get("last_completed_slot") is not None:
+                status["pipeline_last_completed_slot"] = str(pipeline_doc["last_completed_slot"])
+            if pipeline_doc.get("status") is not None:
+                status["pipeline_status"] = str(pipeline_doc["status"])
     except Exception as exc:
         status["mongo_error"] = str(exc)
 

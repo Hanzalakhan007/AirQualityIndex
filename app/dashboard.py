@@ -464,8 +464,15 @@ def render_observed_hero(
     observed_color: str,
     current_source: str,
     latest_timestamp: object,
+    pipeline_timestamp: object | None = None,
+    source_timestamp_label: str = "Latest source timestamp",
 ) -> str:
     observed_text = f"{current_observed_aqi:.1f}" if current_observed_aqi is not None else "N/A"
+    pipeline_text = (
+        f"Latest hourly pipeline: <b>{format_timestamp(pipeline_timestamp)} {TIMEZONE}</b><br>"
+        if pipeline_timestamp is not None
+        else ""
+    )
     return f"""
         <div class="feature-card observed-hero">
             <div class="observed-title">Current Observed AQI</div>
@@ -473,7 +480,8 @@ def render_observed_hero(
             <div class="observed-band" style="color:{observed_color};">{observed_level}</div>
             <div class="panel-copy" style="margin-top:1rem;">
                 Live reading source: <b>{current_source}</b><br>
-                Latest source timestamp: <b>{format_timestamp(latest_timestamp)} {TIMEZONE}</b>
+                {pipeline_text}
+                {source_timestamp_label}: <b>{format_timestamp(latest_timestamp)} {TIMEZONE}</b>
             </div>
             <div class="status-pill">Karachi stream | {TIMEZONE}</div>
         </div>
@@ -685,6 +693,7 @@ def main() -> None:
     backend_status = get_backend_status()
     available_models = get_available_model_names()
     model_options = get_available_model_options()
+    now_local = datetime.now(ZoneInfo(TIMEZONE))
 
     with st.sidebar:
         st.markdown(
@@ -735,10 +744,31 @@ def main() -> None:
             )
 
         mongo_status = "Active" if backend_status["mongo_available"] else "Fallback mode"
+        pipeline_timestamp = backend_status.get("pipeline_last_success_at") or backend_status.get("pipeline_last_completed_slot")
+        latest_source_timestamp = latest_row.get("timestamp")
+        source_timestamp_label = "Latest source timestamp"
+        try:
+            source_dt = pd.to_datetime(latest_source_timestamp)
+            if getattr(source_dt, "tzinfo", None) is None:
+                source_dt = source_dt.tz_localize(ZoneInfo(TIMEZONE))
+            else:
+                source_dt = source_dt.tz_convert(ZoneInfo(TIMEZONE))
+            if source_dt.date() != now_local.date():
+                source_timestamp_label = "Latest available source timestamp"
+        except Exception:
+            pass
+
         render_sidebar_panel(
             "System Status",
             "Control",
-            f"Status: <b>{mongo_status}</b><br>Timezone: <b>{TIMEZONE}</b><br>Latest source timestamp: <b>{format_timestamp(latest_row.get('timestamp'))} {TIMEZONE}</b>",
+            f"Status: <b>{mongo_status}</b><br>"
+            f"Timezone: <b>{TIMEZONE}</b><br>"
+            + (
+                f"Latest hourly pipeline: <b>{format_timestamp(pipeline_timestamp)} {TIMEZONE}</b><br>"
+                if pipeline_timestamp
+                else ""
+            )
+            + f"{source_timestamp_label}: <b>{format_timestamp(latest_source_timestamp)} {TIMEZONE}</b>",
         )
         render_sidebar_panel(
             "Technical Specs",
@@ -835,6 +865,8 @@ def main() -> None:
                 observed_color,
                 current_source,
                 latest_row.get("timestamp"),
+                pipeline_timestamp=pipeline_timestamp,
+                source_timestamp_label=source_timestamp_label,
             ),
             unsafe_allow_html=True,
         )
