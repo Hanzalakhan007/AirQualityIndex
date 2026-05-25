@@ -31,6 +31,7 @@ from config.settings import (
     MONGO_MODEL_REGISTRY_COLLECTION,
     SCALER_REGISTRY_FILENAME,
     SCALER_REGISTRY_NAME,
+    TIMEZONE,
 )
 from src.model_registry import ensure_model_registry_indexes, prune_model_registry_versions
 from src.models.pytorch_model import (
@@ -50,6 +51,25 @@ os.makedirs("models", exist_ok=True)
 os.makedirs("reports", exist_ok=True)
 
 print("Starting Machine Learning Pipeline...")
+
+
+def normalize_timestamp_series(series: pd.Series) -> pd.Series:
+    """Handle mixed ISO/UTC/local timestamp strings without shifting local rows."""
+    timezone_name = TIMEZONE
+
+    def _normalize(value):
+        if pd.isna(value):
+            return pd.NaT
+        parsed = pd.Timestamp(value)
+        if parsed.tzinfo is None:
+            return parsed.tz_localize(timezone_name)
+        return parsed.tz_convert(timezone_name)
+
+    normalized = series.apply(_normalize)
+    if normalized.isna().any():
+        missing_count = int(normalized.isna().sum())
+        raise ValueError(f"Failed to parse {missing_count} timestamp values in training data.")
+    return pd.to_datetime(normalized)
 
 def load_training_data() -> pd.DataFrame:
     """Load processed features from MongoDB, with a local CSV fallback."""
@@ -92,7 +112,7 @@ def add_forecast_targets(dataframe: pd.DataFrame, target: pd.Series) -> pd.DataF
     """Build calendar-day AQI targets for today plus the next three days."""
     result = dataframe.copy()
     bounded_target = pd.to_numeric(target, errors="coerce").clip(lower=0, upper=500)
-    result["date"] = pd.to_datetime(result["timestamp"]).dt.floor("D")
+    result["date"] = result["timestamp"].dt.floor("D")
     daily_targets = (
         pd.DataFrame({"date": result["date"], "aqi_target": bounded_target})
         .groupby("date", as_index=False)["aqi_target"]
@@ -111,7 +131,7 @@ def add_forecast_targets(dataframe: pd.DataFrame, target: pd.Series) -> pd.DataF
 
 
 dataframe = load_training_data()
-dataframe["timestamp"] = pd.to_datetime(dataframe["timestamp"])
+dataframe["timestamp"] = normalize_timestamp_series(dataframe["timestamp"])
 dataframe = dataframe.sort_values("timestamp").reset_index(drop=True)
 
 aqi_target = get_target_series(dataframe)
