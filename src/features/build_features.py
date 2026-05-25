@@ -18,6 +18,7 @@ from config.settings import (
     RAW_DIR,
 )
 from src.data_collection.fetch_data import (
+    fetch_current_aqi,
     fetch_historical_aqi,
     fetch_openmeteo_historical_aqi,
     process_and_save_data,
@@ -94,7 +95,11 @@ def build_daily_features(hourly_df: pd.DataFrame) -> pd.DataFrame:
 def _build_feature_dataframe(dataframe: pd.DataFrame) -> pd.DataFrame:
     dataframe = dataframe.copy()
     dataframe["timestamp"] = pd.to_datetime(dataframe["timestamp"])
-    dataframe = dataframe.sort_values("timestamp").reset_index(drop=True)
+    dataframe = (
+        dataframe.sort_values("timestamp")
+        .drop_duplicates(subset=["timestamp"], keep="last")
+        .reset_index(drop=True)
+    )
 
     if "us_aqi" not in dataframe.columns:
         if "pm2_5" in dataframe.columns:
@@ -147,6 +152,13 @@ def build_features() -> pd.DataFrame:
     raw_data = fetch_historical_aqi_chunks(start_time, end_time)
     if not raw_data:
         raise RuntimeError("No OpenWeather data was returned.")
+
+    current_row = fetch_current_aqi(DEFAULT_LAT, DEFAULT_LON)
+    if current_row:
+        raw_data.append(current_row)
+        print("Appended current OpenWeather observation to the feature dataset.")
+    else:
+        print("Current OpenWeather observation was unavailable; using historical rows only.")
 
     dataframe = _build_feature_dataframe(process_raw_data(raw_data))
     save_local_feature_artifacts(dataframe, raw_data)

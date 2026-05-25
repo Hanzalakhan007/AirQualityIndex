@@ -15,6 +15,7 @@ from config.settings import (
     DEFAULT_LAT,
     DEFAULT_LON,
     OPEN_METEO_AIR_QUALITY,
+    OPENWEATHER_AIR_POLLUTION_CURRENT,
     OPENWEATHER_AIR_POLLUTION_HISTORY,
     OPENWEATHER_API_KEY,
     RAW_DIR,
@@ -65,6 +66,30 @@ def fetch_historical_aqi(lat: float, lon: float, start_date: int, end_date: int)
     if response.status_code == 200:
         return response.json().get("list", [])
     print(f"Error fetching data: {response.status_code}")
+    print(response.text)
+    return None
+
+
+def fetch_current_aqi(lat: float, lon: float) -> dict | None:
+    """Fetch the latest current-hour pollutant measurement from OpenWeather."""
+    print(f"Fetching current AQI for Lat: {lat}, Lon: {lon}...")
+    params = {
+        "lat": lat,
+        "lon": lon,
+        "appid": OPENWEATHER_API_KEY,
+    }
+    try:
+        response = requests.get(OPENWEATHER_AIR_POLLUTION_CURRENT, params=params, timeout=30)
+    except RequestException as exc:
+        print(f"Error fetching current AQI: {exc}")
+        return None
+    if response.status_code == 200:
+        rows = response.json().get("list", [])
+        if rows:
+            return rows[0]
+        print("OpenWeather current AQI returned no rows.")
+        return None
+    print(f"Error fetching current AQI: {response.status_code}")
     print(response.text)
     return None
 
