@@ -465,7 +465,7 @@ def append_live_aqi_to_history(
     current_pm25: float | None = None,
     current_pm10: float | None = None,
 ) -> pd.DataFrame:
-    """Extend daily charts with the live OpenWeather AQI and pollutants."""
+    """Extend daily charts with the latest feature-store AQI and pollutants."""
     if current_observed_aqi is None or current_observed_timestamp is None:
         return history_df
 
@@ -514,7 +514,7 @@ def render_observed_hero(
             <div class="observed-aqi" style="color:{observed_color};">{observed_text}</div>
             <div class="observed-band" style="color:{observed_color};">{observed_level}</div>
             <div class="panel-copy" style="margin-top:1rem;">
-                Live reading source: <b>{current_source}</b><br>
+                Observation source: <b>{current_source}</b><br>
                 {pipeline_text}
                 {source_timestamp_label}: <b>{format_timestamp(latest_timestamp)} {TIMEZONE}</b>
             </div>
@@ -761,10 +761,10 @@ def main() -> None:
 
         st.markdown("### Forecast Controls")
         model_name = st.selectbox("Model strategy", model_options, index=0)
-        if st.button("Refresh Live Data", width="stretch"):
+        if st.button("Reload Stored Data", width="stretch"):
             clear_caches()
             st.rerun()
-        st.caption("Reloads the latest available feature store snapshot, model artifacts, and forecast output.")
+        st.caption("Reloads the latest MongoDB feature-store snapshot, model artifacts, and forecast output.")
 
         st.markdown("### Pollutant Inputs")
         overrides: dict[str, float] = {}
@@ -872,11 +872,7 @@ def main() -> None:
     reliability_text = f"RMSE {float(reliability['rmse']):.2f}" if reliability else "Metrics unavailable"
     forecast_signal = sum(next_three_day_predictions) / len(next_three_day_predictions) if next_three_day_predictions else 0.0
     report_df = build_report_df(predicted_today_aqi, today_date, next_three_day_predictions, next_three_day_dates)
-    observed_timestamp_label = (
-        "Current source timestamp"
-        if current_source.startswith("Current ")
-        else source_timestamp_label
-    )
+    observed_timestamp_label = "Latest feature timestamp"
 
     st.markdown(
         f"""
