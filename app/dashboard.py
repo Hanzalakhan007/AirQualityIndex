@@ -8,7 +8,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from config.settings import DEFAULT_CITY, TIMEZONE
+from config.settings import TIMEZONE
 from src.inference import (
     SLIDER_FEATURES,
     alert_days,
