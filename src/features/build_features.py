@@ -30,6 +30,8 @@ load_dotenv()
 
 print("Starting Feature Engineering...")
 
+MONGO_FEATURE_BATCH_SIZE = 500
+
 
 def fetch_historical_aqi_chunks(start_time: int, end_time: int, chunk_days: int = 30) -> list[dict]:
     """Fetch OpenWeather history in chunks to avoid large-response timeouts."""
@@ -154,13 +156,19 @@ def build_features() -> pd.DataFrame:
         print("Connecting to MongoDB feature store...")
         client = create_verified_mongo_client()
         collection = client[MONGO_DB_NAME][MONGO_FEATURES_COLLECTION]
+        collection.create_index("timestamp", unique=True)
         upload_columns = ["timestamp"] + FEATURE_COLUMNS
         upload_df = dataframe[[column for column in upload_columns if column in dataframe.columns]].copy()
         records = json.loads(upload_df.to_json(orient="records", date_format="iso"))
-        operations = [ReplaceOne({"timestamp": record["timestamp"]}, record, upsert=True) for record in records]
-        if operations:
-            collection.bulk_write(operations, ordered=False)
-        collection.create_index("timestamp", unique=True)
+        for start in range(0, len(records), MONGO_FEATURE_BATCH_SIZE):
+            batch = records[start : start + MONGO_FEATURE_BATCH_SIZE]
+            operations = [ReplaceOne({"timestamp": record["timestamp"]}, record, upsert=True) for record in batch]
+            if operations:
+                collection.bulk_write(operations, ordered=False)
+            print(
+                f"Upserted MongoDB feature batch "
+                f"{start + 1}-{start + len(batch)} of {len(records)}."
+            )
         print(f"Successfully upserted {len(records)} feature rows into MongoDB!")
         mongo_synced = True
     except Exception as exc:
