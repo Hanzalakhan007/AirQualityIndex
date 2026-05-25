@@ -1,7 +1,7 @@
 """Streamlit dashboard for AQI forecasting."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -47,13 +47,13 @@ AQI_BANDS = [
 ]
 
 
-def format_timestamp(value: object) -> str:
+def format_timestamp(value: object, assume_utc: bool = False) -> str:
     if value is None:
         return "Unknown time"
     try:
         parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
         if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=ZoneInfo(TIMEZONE))
+            parsed = parsed.replace(tzinfo=timezone.utc if assume_utc else ZoneInfo(TIMEZONE))
         localized = parsed.astimezone(ZoneInfo(TIMEZONE))
         return localized.strftime("%b %d, %Y %I:%M %p")
     except ValueError:
@@ -504,7 +504,7 @@ def render_observed_hero(
 ) -> str:
     observed_text = f"{current_observed_aqi:.1f}" if current_observed_aqi is not None else "N/A"
     pipeline_text = (
-        f"Latest hourly pipeline: <b>{format_timestamp(pipeline_timestamp)} {TIMEZONE}</b><br>"
+        f"Latest hourly pipeline: <b>{format_timestamp(pipeline_timestamp, assume_utc=True)} {TIMEZONE}</b><br>"
         if pipeline_timestamp is not None
         else ""
     )
@@ -808,7 +808,7 @@ def main() -> None:
             f"Status: <b>{mongo_status}</b><br>"
             f"Timezone: <b>{TIMEZONE}</b><br>"
             + (
-                f"Latest hourly pipeline: <b>{format_timestamp(pipeline_timestamp)} {TIMEZONE}</b><br>"
+                f"Latest hourly pipeline: <b>{format_timestamp(pipeline_timestamp, assume_utc=True)} {TIMEZONE}</b><br>"
                 if pipeline_timestamp
                 else ""
             )

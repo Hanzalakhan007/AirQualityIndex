@@ -16,6 +16,7 @@ from config.settings import (
     MONGO_FEATURES_COLLECTION,
     PROCESSED_DIR,
     RAW_DIR,
+    TIMEZONE,
 )
 from src.data_collection.fetch_data import (
     fetch_current_aqi,
@@ -156,11 +157,13 @@ def build_features() -> pd.DataFrame:
     current_row = fetch_current_aqi(DEFAULT_LAT, DEFAULT_LON)
     if current_row:
         raw_data.append(current_row)
-        print("Appended current OpenWeather observation to the feature dataset.")
+        current_timestamp = pd.to_datetime(current_row.get("dt"), unit="s", utc=True).tz_convert(TIMEZONE)
+        print(f"Appended current OpenWeather observation at {current_timestamp} to the feature dataset.")
     else:
         print("Current OpenWeather observation was unavailable; using historical rows only.")
 
     dataframe = _build_feature_dataframe(process_raw_data(raw_data))
+    print(f"Latest engineered feature timestamp: {dataframe['timestamp'].max()}")
     save_local_feature_artifacts(dataframe, raw_data)
 
     mongo_synced = False
