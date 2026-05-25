@@ -19,7 +19,7 @@ from src.inference import (
     get_available_model_names,
     get_available_model_options,
     get_backend_status,
-    get_current_aqi,
+    get_current_observation,
     get_default_model_name,
     get_latest_feature_row,
     get_model_leaderboard,
@@ -462,8 +462,10 @@ def append_live_aqi_to_history(
     history_df: pd.DataFrame,
     current_observed_aqi: float | None,
     current_observed_timestamp: object | None,
+    current_pm25: float | None = None,
+    current_pm10: float | None = None,
 ) -> pd.DataFrame:
-    """Extend daily charts with the live OpenWeather AQI when it is newer than stored history."""
+    """Extend daily charts with the live OpenWeather AQI and pollutants."""
     if current_observed_aqi is None or current_observed_timestamp is None:
         return history_df
 
@@ -477,8 +479,8 @@ def append_live_aqi_to_history(
             {
                 "date": current_date,
                 "aqi_display": current_observed_aqi,
-                "pm2_5": None,
-                "pm10": None,
+                "pm2_5": current_pm25,
+                "pm10": current_pm10,
             }
         ]
     )
@@ -573,6 +575,15 @@ def render_forecast_chart(history_df: pd.DataFrame, predictions: list[float]) ->
             marker={"size": 8, "color": "#f4d35e"},
         )
     )
+    chart_dates = []
+    if not history_df.empty:
+        chart_dates.extend(pd.to_datetime(history_df["date"]).dt.tz_localize(None).tolist())
+    if not daily_forecast.empty:
+        chart_dates.extend(pd.to_datetime(daily_forecast["date"]).dt.tz_localize(None).tolist())
+    xaxis_config = {"title": "Date"}
+    if chart_dates:
+        xaxis_config["range"] = [min(chart_dates), max(chart_dates) + pd.Timedelta(hours=12)]
+
     max_chart_value = max(predictions[1:4] or predictions or [0.0])
     figure.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
@@ -580,7 +591,7 @@ def render_forecast_chart(history_df: pd.DataFrame, predictions: list[float]) ->
         font={"color": "#edf4fb"},
         height=420,
         margin={"l": 16, "r": 16, "t": 18, "b": 18},
-        xaxis_title="Date",
+        xaxis=xaxis_config,
         yaxis_title="AQI",
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0},
         shapes=add_aqi_band_shapes(),
@@ -834,8 +845,17 @@ def main() -> None:
     best_model = forecast["model_name"] or get_default_model_name()
     leaderboard = forecast["leaderboard"] or get_model_leaderboard()
     history_df = get_recent_daily_history()
-    current_observed_aqi, current_source, current_observed_timestamp = get_current_aqi()
-    chart_history_df = append_live_aqi_to_history(history_df, current_observed_aqi, current_observed_timestamp)
+    current_observation = get_current_observation()
+    current_observed_aqi = current_observation["aqi"]
+    current_source = current_observation["source"]
+    current_observed_timestamp = current_observation["timestamp"]
+    chart_history_df = append_live_aqi_to_history(
+        history_df,
+        current_observed_aqi,
+        current_observed_timestamp,
+        current_observation.get("pm2_5"),
+        current_observation.get("pm10"),
+    )
     explainability_assets = explainability_images()
 
     observed_level, observed_color = aqi_level_and_color(current_observed_aqi)

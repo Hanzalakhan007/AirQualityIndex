@@ -632,20 +632,27 @@ def predict_next_days(model_name: str | None = None, overrides: dict[str, float]
     }
 
 
-def get_current_aqi() -> tuple[float | None, str, Any | None]:
-    """Return the best current AQI reading, its source label, and its timestamp."""
+def get_current_observation() -> dict[str, Any]:
+    """Return the best current AQI reading plus live pollutant context."""
     current_snapshot = fetch_openweather_current_snapshot()
     if current_snapshot:
+        components = current_snapshot.get("components", {})
         current_value = normalize_aqi_value(
             None,
-            current_snapshot.get("components", {}).get("pm2_5"),
+            components.get("pm2_5"),
         )
         if current_value is not None:
             timestamp = datetime.fromtimestamp(
                 current_snapshot.get("dt"),
                 tz=ZoneInfo("UTC"),
             ).astimezone(ZoneInfo(TIMEZONE))
-            return calibrate_aqi(current_value), "OpenWeather", timestamp
+            return {
+                "aqi": calibrate_aqi(current_value),
+                "source": "OpenWeather",
+                "timestamp": timestamp,
+                "pm2_5": components.get("pm2_5"),
+                "pm10": components.get("pm10"),
+            }
 
     latest_row = get_latest_feature_row()
     current_value = normalize_aqi_value(
@@ -653,14 +660,32 @@ def get_current_aqi() -> tuple[float | None, str, Any | None]:
         latest_row.get("pm2_5"),
     )
     if current_value is not None:
-        return calibrate_aqi(current_value), "Latest Stored Observation", latest_row.get("timestamp")
+        return {
+            "aqi": calibrate_aqi(current_value),
+            "source": "Latest Stored Observation",
+            "timestamp": latest_row.get("timestamp"),
+            "pm2_5": latest_row.get("pm2_5"),
+            "pm10": latest_row.get("pm10"),
+        }
 
     snapshot = fetch_openmeteo_snapshot()
     if snapshot:
         snapshot_value = normalize_aqi_value(snapshot.get("us_aqi"), snapshot.get("pm2_5"))
         if snapshot_value is not None:
-            return calibrate_aqi(snapshot_value), "Current Open-Meteo", snapshot.get("time")
-    return None, "Unavailable", None
+            return {
+                "aqi": calibrate_aqi(snapshot_value),
+                "source": "Current Open-Meteo",
+                "timestamp": snapshot.get("time"),
+                "pm2_5": snapshot.get("pm2_5"),
+                "pm10": snapshot.get("pm10"),
+            }
+    return {"aqi": None, "source": "Unavailable", "timestamp": None, "pm2_5": None, "pm10": None}
+
+
+def get_current_aqi() -> tuple[float | None, str, Any | None]:
+    """Return the best current AQI reading, its source label, and its timestamp."""
+    observation = get_current_observation()
+    return observation["aqi"], observation["source"], observation["timestamp"]
 
 
 def get_recent_daily_history(days: int = 14) -> pd.DataFrame:
