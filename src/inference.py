@@ -57,6 +57,11 @@ LOCAL_MODEL_FILES = {
 LOCAL_SCALER_FILE = MODELS_DIR / SCALER_REGISTRY_FILENAME
 
 
+def parse_feature_timestamps(values: Any) -> pd.Series:
+    """Parse mixed Mongo/local timestamp formats consistently."""
+    return pd.to_datetime(values, format="mixed", errors="coerce", utc=True)
+
+
 def clear_caches() -> None:
     """Clear cached models and feature data."""
     load_feature_data.cache_clear()
@@ -180,7 +185,8 @@ def _load_local_feature_data() -> pd.DataFrame:
     dataframe = pd.read_csv(LOCAL_FEATURES_FILE)
     if "timestamp" not in dataframe.columns:
         raise RuntimeError(f"Local fallback feature file '{LOCAL_FEATURES_FILE}' does not contain a timestamp column.")
-    dataframe["timestamp"] = pd.to_datetime(dataframe["timestamp"])
+    dataframe["timestamp"] = parse_feature_timestamps(dataframe["timestamp"])
+    dataframe = dataframe.dropna(subset=["timestamp"])
     return dataframe.sort_values("timestamp").reset_index(drop=True)
 
 
@@ -302,18 +308,22 @@ def get_backend_status() -> dict[str, Any]:
         try:
             local_df = pd.read_csv(LOCAL_FEATURES_FILE, usecols=["timestamp"])
             if not local_df.empty:
-                status["local_feature_timestamp"] = str(pd.to_datetime(local_df["timestamp"]).max())
+                status["local_feature_timestamp"] = str(parse_feature_timestamps(local_df["timestamp"]).max())
         except Exception:
             pass
 
     try:
         database = get_mongo_database()
         collection = database[MONGO_FEATURES_COLLECTION]
-        latest_row = collection.find_one({}, {"timestamp": 1, "_id": 0}, sort=[("timestamp", -1)])
+        latest_rows = list(collection.find({}, {"timestamp": 1, "_id": 0}))
         status["mongo_available"] = True
         status["feature_source"] = "mongodb"
-        if latest_row and latest_row.get("timestamp") is not None:
-            status["mongo_feature_timestamp"] = str(latest_row["timestamp"])
+        if latest_rows:
+            timestamps = parse_feature_timestamps(
+                [row.get("timestamp") for row in latest_rows if row.get("timestamp") is not None],
+            ).dropna()
+            if len(timestamps):
+                status["mongo_feature_timestamp"] = str(timestamps.max())
         pipeline_doc = database[MONGO_PIPELINE_CONTROL_COLLECTION].find_one(
             {"_id": "hourly_feature_pipeline"},
             {
@@ -497,7 +507,8 @@ def load_feature_data() -> pd.DataFrame:
         rows = list(collection.find({}, {"_id": 0}).sort("timestamp", 1))
         if rows:
             dataframe = pd.DataFrame(rows)
-            dataframe["timestamp"] = pd.to_datetime(dataframe["timestamp"])
+            dataframe["timestamp"] = parse_feature_timestamps(dataframe["timestamp"])
+            dataframe = dataframe.dropna(subset=["timestamp"])
             return dataframe.sort_values("timestamp").reset_index(drop=True)
     except Exception:
         pass
@@ -659,7 +670,8 @@ def get_current_aqi() -> tuple[float | None, str, Any | None]:
 def get_recent_daily_history(days: int = 14) -> pd.DataFrame:
     """Return recent daily AQI history derived from the feature store."""
     dataframe = load_feature_data().copy()
-    dataframe["timestamp"] = pd.to_datetime(dataframe["timestamp"])
+    dataframe["timestamp"] = parse_feature_timestamps(dataframe["timestamp"])
+    dataframe = dataframe.dropna(subset=["timestamp"])
     dataframe["aqi_display"] = dataframe.apply(
         lambda row: normalize_aqi_value(row.get("aqi", row.get("us_aqi")), row.get("pm2_5")),
         axis=1,
