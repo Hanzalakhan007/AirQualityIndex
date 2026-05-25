@@ -801,7 +801,7 @@ def main() -> None:
     best_model = forecast["model_name"] or get_default_model_name()
     leaderboard = forecast["leaderboard"] or get_model_leaderboard()
     history_df = get_recent_daily_history()
-    current_observed_aqi, current_source = get_current_aqi()
+    current_observed_aqi, current_source, current_observed_timestamp = get_current_aqi()
     explainability_assets = explainability_images()
 
     observed_level, observed_color = aqi_level_and_color(current_observed_aqi)
@@ -818,6 +818,11 @@ def main() -> None:
     reliability_text = f"RMSE {float(reliability['rmse']):.2f}" if reliability else "Metrics unavailable"
     forecast_signal = sum(next_three_day_predictions) / len(next_three_day_predictions) if next_three_day_predictions else 0.0
     report_df = build_report_df(predicted_today_aqi, today_date, next_three_day_predictions, next_three_day_dates)
+    observed_timestamp_label = (
+        "Current source timestamp"
+        if current_source.startswith("Current ")
+        else source_timestamp_label
+    )
 
     st.markdown(
         f"""
@@ -864,9 +869,9 @@ def main() -> None:
                 observed_level,
                 observed_color,
                 current_source,
-                latest_row.get("timestamp"),
+                current_observed_timestamp or latest_row.get("timestamp"),
                 pipeline_timestamp=pipeline_timestamp,
-                source_timestamp_label=source_timestamp_label,
+                source_timestamp_label=observed_timestamp_label,
             ),
             unsafe_allow_html=True,
         )

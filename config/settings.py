@@ -50,6 +50,7 @@ USE_OPENMETEO_AQI = os.getenv("USE_OPENMETEO_AQI", "true").lower() in ("true", "
 OPEN_METEO_BASE = "https://api.open-meteo.com/v1"
 OPEN_METEO_AIR_QUALITY = "https://air-quality-api.open-meteo.com/v1/air-quality"
 OPENWEATHER_AIR_POLLUTION_HISTORY = "https://api.openweathermap.org/data/2.5/air_pollution/history"
+OPENWEATHER_AIR_POLLUTION_CURRENT = "https://api.openweathermap.org/data/2.5/air_pollution"
 
 AQI_SCALE_1_5 = os.getenv("AQI_SCALE_1_5", "false").lower() in ("true", "1", "yes")
 AQI_ALERT_THRESHOLD = float(os.getenv("AQI_ALERT_THRESHOLD", "101"))

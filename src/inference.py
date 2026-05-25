@@ -32,6 +32,8 @@ from config.settings import (
     MONGO_PIPELINE_CONTROL_COLLECTION,
     MONGO_MODEL_REGISTRY_COLLECTION,
     OPEN_METEO_AIR_QUALITY,
+    OPENWEATHER_AIR_POLLUTION_CURRENT,
+    OPENWEATHER_API_KEY,
     PROCESSED_DIR,
     REPORTS_DIR,
     SCALER_REGISTRY_FILENAME,
@@ -558,6 +560,27 @@ def fetch_openmeteo_snapshot() -> dict[str, Any] | None:
         return None
 
 
+def fetch_openweather_current_snapshot() -> dict[str, Any] | None:
+    """Fetch the current air-pollution snapshot directly from OpenWeather."""
+    if not OPENWEATHER_API_KEY:
+        return None
+    params = {
+        "lat": DEFAULT_LAT,
+        "lon": DEFAULT_LON,
+        "appid": OPENWEATHER_API_KEY,
+    }
+    try:
+        response = requests.get(OPENWEATHER_AIR_POLLUTION_CURRENT, params=params, timeout=20)
+        response.raise_for_status()
+        payload = response.json()
+        readings = payload.get("list", [])
+        if not readings:
+            return None
+        return readings[0]
+    except Exception:
+        return None
+
+
 def predict_next_days(model_name: str | None = None, overrides: dict[str, float] | None = None) -> dict[str, Any]:
     """Generate today's confirmation AQI plus a three-day AQI forecast."""
     metadata = get_model_registry_metadata()
@@ -609,22 +632,35 @@ def predict_next_days(model_name: str | None = None, overrides: dict[str, float]
     }
 
 
-def get_current_aqi() -> tuple[float | None, str]:
-    """Return the best current AQI reading and its source label."""
+def get_current_aqi() -> tuple[float | None, str, Any | None]:
+    """Return the best current AQI reading, its source label, and its timestamp."""
+    current_snapshot = fetch_openweather_current_snapshot()
+    if current_snapshot:
+        current_value = normalize_aqi_value(
+            None,
+            current_snapshot.get("components", {}).get("pm2_5"),
+        )
+        if current_value is not None:
+            timestamp = datetime.fromtimestamp(
+                current_snapshot.get("dt"),
+                tz=ZoneInfo("UTC"),
+            ).astimezone(ZoneInfo(TIMEZONE))
+            return calibrate_aqi(current_value), "Current OpenWeather", timestamp
+
     latest_row = get_latest_feature_row()
     current_value = normalize_aqi_value(
         latest_row.get("us_aqi", latest_row.get("aqi")),
         latest_row.get("pm2_5"),
     )
     if current_value is not None:
-        return calibrate_aqi(current_value), "Current Observed"
+        return calibrate_aqi(current_value), "Latest Stored Observation", latest_row.get("timestamp")
 
     snapshot = fetch_openmeteo_snapshot()
     if snapshot:
         snapshot_value = normalize_aqi_value(snapshot.get("us_aqi"), snapshot.get("pm2_5"))
         if snapshot_value is not None:
-            return calibrate_aqi(snapshot_value), "Current Snapshot"
-    return None, "Unavailable"
+            return calibrate_aqi(snapshot_value), "Current Open-Meteo", snapshot.get("time")
+    return None, "Unavailable", None
 
 
 def get_recent_daily_history(days: int = 14) -> pd.DataFrame:
