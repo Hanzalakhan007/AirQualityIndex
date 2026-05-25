@@ -22,6 +22,9 @@ import xgboost as xgb
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from config.settings import (
+    MODEL_PROMOTION_MAX_RMSE,
+    MODEL_PROMOTION_MIN_R2,
+    MODEL_PROMOTION_REQUIRE_OK,
     MODEL_REGISTRY_NAMES,
     PROCESSED_DIR,
     MONGO_DB_NAME,
@@ -341,6 +344,21 @@ print("UPLOADING TO MONGODB MODEL REGISTRY")
 print("=" * 40)
 
 
+def validate_model_promotion(model_name: str, metrics: dict[str, float | str]) -> tuple[bool, str]:
+    """Decide whether this training run is healthy enough to replace production."""
+    rmse = float(metrics.get("rmse", 999999.0))
+    r2 = float(metrics.get("r2", -999999.0))
+    fit_status = str(metrics.get("fit_status", "unknown"))
+
+    if MODEL_PROMOTION_REQUIRE_OK and fit_status != "ok":
+        return False, f"best model fit status is '{fit_status}', expected 'ok'"
+    if r2 < MODEL_PROMOTION_MIN_R2:
+        return False, f"best model R2 {r2:.4f} is below minimum {MODEL_PROMOTION_MIN_R2:.4f}"
+    if rmse > MODEL_PROMOTION_MAX_RMSE:
+        return False, f"best model RMSE {rmse:.4f} is above maximum {MODEL_PROMOTION_MAX_RMSE:.4f}"
+    return True, f"{model_name} passed promotion checks"
+
+
 def build_registry_metrics(model_name: str) -> dict[str, float | str | int]:
     metrics = dict(results[model_name])
     metrics["feature_count"] = len(available_features)
@@ -399,6 +417,12 @@ def save_registry_artifact(
 
 mongo_client = None
 try:
+    promotion_allowed, promotion_reason = validate_model_promotion(best_model_name, results[best_model_name])
+    if not promotion_allowed:
+        print(f"Skipping MongoDB model-registry upload: {promotion_reason}.")
+        raise SystemExit(0)
+    print(f"Model promotion approved: {promotion_reason}.")
+
     mongo_client = create_verified_mongo_client()
     mongo_database = mongo_client[MONGO_DB_NAME]
     model_payloads = {

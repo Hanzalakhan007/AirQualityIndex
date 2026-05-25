@@ -46,6 +46,10 @@ MONGO_SERVER_SELECTION_TIMEOUT_MS = int(os.getenv("MONGO_SERVER_SELECTION_TIMEOU
 MONGO_SOCKET_TIMEOUT_MS = int(os.getenv("MONGO_SOCKET_TIMEOUT_MS", "30000"))
 MONGO_CONNECT_TIMEOUT_MS = int(os.getenv("MONGO_CONNECT_TIMEOUT_MS", "30000"))
 
+MODEL_PROMOTION_REQUIRE_OK = os.getenv("MODEL_PROMOTION_REQUIRE_OK", "true").lower() in ("true", "1", "yes")
+MODEL_PROMOTION_MIN_R2 = float(os.getenv("MODEL_PROMOTION_MIN_R2", "0.0"))
+MODEL_PROMOTION_MAX_RMSE = float(os.getenv("MODEL_PROMOTION_MAX_RMSE", "35.0"))
+
 USE_OPENMETEO_AQI = os.getenv("USE_OPENMETEO_AQI", "true").lower() in ("true", "1", "yes")
 OPEN_METEO_BASE = "https://api.open-meteo.com/v1"
 OPEN_METEO_AIR_QUALITY = "https://air-quality-api.open-meteo.com/v1/air-quality"
