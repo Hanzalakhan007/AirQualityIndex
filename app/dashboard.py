@@ -458,6 +458,39 @@ def render_metric_card(label: str, value: str, subtext: str, color: str) -> str:
     """
 
 
+def append_live_aqi_to_history(
+    history_df: pd.DataFrame,
+    current_observed_aqi: float | None,
+    current_observed_timestamp: object | None,
+) -> pd.DataFrame:
+    """Extend daily charts with the live OpenWeather AQI when it is newer than stored history."""
+    if current_observed_aqi is None or current_observed_timestamp is None:
+        return history_df
+
+    try:
+        current_date = pd.to_datetime(current_observed_timestamp).tz_localize(None).floor("D")
+    except Exception:
+        return history_df
+
+    live_row = pd.DataFrame(
+        [
+            {
+                "date": current_date,
+                "aqi_display": current_observed_aqi,
+                "pm2_5": None,
+                "pm10": None,
+            }
+        ]
+    )
+    if history_df.empty:
+        return live_row
+
+    updated = history_df.copy()
+    updated["date"] = pd.to_datetime(updated["date"]).dt.tz_localize(None)
+    updated = updated[updated["date"].dt.floor("D") != current_date]
+    return pd.concat([updated, live_row], ignore_index=True).sort_values("date")
+
+
 def render_observed_hero(
     current_observed_aqi: float | None,
     observed_level: str,
@@ -802,6 +835,7 @@ def main() -> None:
     leaderboard = forecast["leaderboard"] or get_model_leaderboard()
     history_df = get_recent_daily_history()
     current_observed_aqi, current_source, current_observed_timestamp = get_current_aqi()
+    chart_history_df = append_live_aqi_to_history(history_df, current_observed_aqi, current_observed_timestamp)
     explainability_assets = explainability_images()
 
     observed_level, observed_color = aqi_level_and_color(current_observed_aqi)
@@ -917,7 +951,7 @@ def main() -> None:
         '<div class="section-copy">A compact trend view showing recent daily AQI behavior against the next 72-hour forecast window.</div>',
         unsafe_allow_html=True,
     )
-    render_forecast_chart(history_df, predictions)
+    render_forecast_chart(chart_history_df, predictions)
 
     tab_forecast, tab_history, tab_models, tab_health = st.tabs(
         ["Detailed Report", "Historical Overview", "Model Insights", "Health Guidance"]
@@ -969,11 +1003,11 @@ def main() -> None:
 
     with tab_history:
         stat_cols = st.columns(4)
-        if not history_df.empty:
-            avg_aqi = history_df["aqi_display"].mean()
-            avg_pm25 = history_df["pm2_5"].mean()
-            avg_pm10 = history_df["pm10"].mean()
-            peak_aqi = history_df["aqi_display"].max()
+        if not chart_history_df.empty:
+            avg_aqi = chart_history_df["aqi_display"].mean()
+            avg_pm25 = history_df["pm2_5"].mean() if not history_df.empty else 0.0
+            avg_pm10 = history_df["pm10"].mean() if not history_df.empty else 0.0
+            peak_aqi = chart_history_df["aqi_display"].max()
         else:
             avg_aqi = avg_pm25 = avg_pm10 = peak_aqi = 0.0
         history_stats = [
@@ -985,7 +1019,7 @@ def main() -> None:
         for column, (label, value, subtext) in zip(stat_cols, history_stats):
             with column:
                 st.markdown(render_metric_card(label, value, subtext, "#f4d35e"), unsafe_allow_html=True)
-        render_history_chart(history_df)
+        render_history_chart(chart_history_df)
 
     with tab_models:
         insight_left, insight_right = st.columns([1.0, 1.2], gap="large")
