@@ -121,9 +121,7 @@ pm25_to_us_aqi(pm25_ugm3)
 
 This is why the dashboard shows values such as `60.3`, `71.8`, or `95.0` instead of only `1`, `2`, `3`, `4`, or `5`.
 
-Technical explanation:
-
-> OpenWeather gives a 1-5 AQI category, but my model needs a continuous numerical AQI target. So I derive a US-style AQI from PM2.5 concentration using breakpoint interpolation, while still keeping OpenWeather pollutant values as input features.
+OpenWeather's 1-5 AQI category is retained as contextual information, while the continuous PM2.5-derived AQI is used as the regression target for model training and forecasting.
 
 ---
 
@@ -151,9 +149,7 @@ Feature groups include:
 - rolling features: `aqi_rolling_24`, `pm25_rolling_24`, `pm10_rolling_24`, `co_rolling_24`;
 - trend feature: `aqi_change_rate`.
 
-Why these are useful:
-
-> AQI is a time-series problem. Recent AQI values, previous-day behavior, rolling averages, and pollutant trends help the model understand short-term and daily air-quality patterns.
+These features are used because AQI is a time-series problem. Recent AQI values, previous-day behavior, rolling averages, and pollutant trends help the model learn short-term and daily air-quality patterns.
 
 ---
 
@@ -268,9 +264,7 @@ Purpose:
 - upload latest features to MongoDB;
 - keep the dashboard's current observed AQI fresh.
 
-Important point:
-
-> The hourly pipeline does not retrain the model. It updates the feature store only.
+The hourly pipeline does not retrain the model. It updates the feature store so the dashboard can use the latest available observations.
 
 ### 7.2 Daily Training Pipeline
 
@@ -293,9 +287,7 @@ Purpose:
 - update metrics and model registry;
 - promote the best safe model.
 
-Important point:
-
-> Daily retraining does not guarantee daily metric changes because one new day is very small compared with the two-year historical dataset.
+Daily retraining does not guarantee visible metric changes because one new day is very small compared with the two-year historical dataset.
 
 ### 7.3 Continuous Integration Pipeline
 
@@ -346,9 +338,7 @@ The dashboard displays `target_day_0` separately as **Predicted AQI Today**, whi
 
 The project uses chronological train/test splitting instead of random splitting. This is important because AQI is time-series data.
 
-Why chronological split:
-
-> In real forecasting, the model predicts the future using the past. A chronological split better simulates real-world forecasting than random train/test splitting.
+Chronological splitting is used because real forecasting predicts future values from past observations. This better simulates deployment behavior than random train/test splitting.
 
 ### 8.3 Metrics Used
 
@@ -398,9 +388,7 @@ The dataset contains around two years of hourly observations. One new day adds o
 
 Therefore, daily retraining may produce the same or almost identical metrics.
 
-Technical explanation:
-
-> Metrics are not hardcoded. They are calculated by the training pipeline, but because the dataset is large and the train/test split remains almost the same, daily retraining may not visibly change the final leaderboard.
+Metrics are calculated by the training pipeline. Because the dataset is large and the train/test split remains almost the same, daily retraining may not visibly change the final leaderboard.
 
 ---
 
@@ -477,15 +465,19 @@ Outputs are stored in:
 reports/explainability/
 ```
 
-Why XGBoost appears in explainability:
-
-> XGBoost is part of the benchmark model set and is convenient for SHAP/LIME-style feature impact analysis. The production model remains Ridge Regression.
+XGBoost appears in explainability outputs because it is part of the benchmark model set and is useful for feature-impact analysis. The production model remains Ridge Regression.
 
 ---
 
 ## 12. Deployment
 
 The project is deployed as a Streamlit Cloud application.
+
+Live dashboard:
+
+```text
+https://hanzalakhan-aqi.streamlit.app/
+```
 
 Deployment components:
 
@@ -548,18 +540,7 @@ Resolution:
 - separated hourly feature refresh from daily training;
 - added model registry retention and pruning support.
 
-### 13.5 Forecast Wording Mismatch
-
-Problem:
-
-- early wording could make the system look like a 4-day forecast.
-
-Resolution:
-
-- current-day prediction is labeled as a confirmation signal;
-- project forecast is consistently described as next 3 days.
-
-### 13.6 Experimental Features Worsened Metrics
+### 13.5 Experimental Features Worsened Metrics
 
 Problem:
 
@@ -575,7 +556,7 @@ Resolution:
 
 ## 14. Final Results
 
-The final system is complete, operational, and ready for demonstration.
+The final system is complete, operational, and ready for evaluation.
 
 Completed outcomes:
 
@@ -600,33 +581,18 @@ Completed outcomes:
 
 ## 15. Limitations
 
-The project is strong, but it is not perfect. Important limitations:
+Known limitations:
 
 - AQI is currently derived mainly from PM2.5 rather than full pollutant sub-index aggregation.
 - OpenWeather's built-in AQI is only 1-5, so continuous AQI is calculated by the project.
 - GitHub Actions schedules are best-effort and may not run at exact clock times.
 - Weather feature experiments were not kept because they did not improve RMSE.
 - Independent validation from more Karachi monitoring stations would improve real-world confidence.
-- Arbitrary date-range backfill is intentionally deferred as future work.
+- Arbitrary date-range backfill is outside the finalized project scope.
 
 ---
 
-## 16. Future Work
-
-Possible improvements:
-
-- calculate pollutant-wise AQI sub-indexes for PM2.5, PM10, O3, NO2, SO2, and CO;
-- add more independent data sources for validation;
-- add model drift monitoring;
-- add confidence intervals for forecasts;
-- improve Random Forest/XGBoost regularization through careful ablation;
-- add email/SMS health alerts;
-- add a dedicated arbitrary date-range backfill script;
-- add a model-version comparison page in the dashboard.
-
----
-
-## 17. Project Summary
+## 16. Project Summary
 
 Karachi AirWatch is a complete AQI forecasting system for Karachi. It uses OpenWeather air pollution data, derives continuous AQI from PM2.5, engineers time-series features, trains multiple machine learning models, selects Ridge Regression as the best stable model, stores production artifacts in MongoDB Atlas, and serves predictions through a deployed Streamlit dashboard and Flask API. GitHub Actions automates hourly feature refresh, daily model training, CI checks, and deployment verification.
 
@@ -634,7 +600,7 @@ The project demonstrates not only machine learning but also practical MLOps: fea
 
 ---
 
-## 18. Project Metadata
+## 17. Project Metadata
 
 **Project:** Karachi AirWatch AQI Forecasting System  
 **Final production model:** Ridge Regression  

@@ -1,6 +1,17 @@
-# Air Quality Index Predictor
+# Karachi AirWatch: AQI Forecasting System
 
-This project predicts the **next 3 days of AQI** from historical pollution data, engineered time features, and multiple ML models including a PyTorch MLP. It uses MongoDB as both the feature store and model registry, plus shared config, an API entrypoint, Streamlit theming, wrapper scripts, and deployment docs.
+Karachi AirWatch is an end-to-end air-quality forecasting system for Karachi, Pakistan. It uses OpenWeather air-pollution data, derives a continuous AQI target from PM2.5, builds time-series features, trains multiple forecasting models, and serves the final Ridge Regression model through a Streamlit dashboard and Flask API.
+
+**Live dashboard:** https://hanzalakhan-aqi.streamlit.app/
+
+The production system provides:
+
+- latest observed AQI from the feature store;
+- today's AQI confirmation prediction;
+- next 3 days AQI forecast;
+- model leaderboard and evaluation metrics;
+- SHAP/LIME explainability outputs;
+- automated hourly feature refresh and daily model training.
 
 ## What is included
 
@@ -50,10 +61,16 @@ scripts/                Friendly task wrappers
 src/                    Core data science code
 ```
 
-## Notes
+## Model Summary
+
+- Production model: Ridge Regression
+- Production RMSE: 29.63 AQI points
+- Fit status: OK
+- Evaluation: chronological holdout split over the engineered historical dataset
+
+## Operational Notes
 
 - The dashboard and API read features and model artifacts from MongoDB at runtime.
-- On Atlas free tiers, set `MONGO_MODEL_REGISTRY_MAX_VERSIONS` to keep only the latest few model uploads and avoid filling the cluster with hourly retrains.
-- If the registry has already filled the cluster, run `python scripts/prune_model_registry.py --keep 3` once to free space before rerunning the hourly workflow.
-- `verify_prediction.py` is included as a lightweight smoke test for CI.
-- Existing tracked data and model files are preserved.
+- The hourly workflow refreshes features only; it does not retrain the model.
+- The daily workflow retrains and evaluates the models.
+- `verify_prediction.py` provides a lightweight smoke test for CI.
