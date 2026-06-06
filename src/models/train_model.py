@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import RidgeCV
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.preprocessing import StandardScaler
@@ -145,9 +145,13 @@ available_features = [column for column in FEATURE_COLUMNS if column in datafram
 X = dataframe[available_features].apply(pd.to_numeric, errors="coerce").fillna(0.0)
 y = dataframe[["target_day_0", "target_day_1", "target_day_2", "target_day_3"]]
 
-train_size = int(len(dataframe) * 0.8)
-X_train, X_test = X.iloc[:train_size], X.iloc[train_size:]
-y_train, y_test = y.iloc[:train_size], y.iloc[train_size:]
+unique_dates = dataframe["date"].drop_duplicates().sort_values().reset_index(drop=True)
+split_date = unique_dates.iloc[int(len(unique_dates) * 0.8)]
+train_mask = dataframe["date"] < split_date
+test_mask = dataframe["date"] >= split_date
+
+X_train, X_test = X.loc[train_mask], X.loc[test_mask]
+y_train, y_test = y.loc[train_mask], y.loc[test_mask]
 
 scaler = StandardScaler()
 X_train_scaled = scaler.fit_transform(X_train)
@@ -221,15 +225,17 @@ baseline_preds = np.tile(
 )
 
 print("\n[1/4] Training Ridge Regression...")
-ridge = Ridge(alpha=1.0)
+ridge = RidgeCV(alphas=[0.05, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0])
 ridge.fit(X_train_scaled, y_train)
 ridge_preds = ridge.predict(X_test_scaled)
 
 print("[2/4] Training Random Forest...")
 rf = RandomForestRegressor(
     n_estimators=300,
-    max_depth=10,
-    min_samples_leaf=8,
+    max_depth=4,
+    min_samples_leaf=24,
+    min_samples_split=48,
+    max_features=0.7,
     random_state=42,
     n_jobs=-1,
 )
@@ -238,13 +244,18 @@ rf_preds = rf.predict(X_test_scaled)
 
 print("[3/4] Training XGBoost (Multi-Output)...")
 xgb_base = xgb.XGBRegressor(
-    n_estimators=250,
-    max_depth=3,
+    n_estimators=100,
+    max_depth=1,
     learning_rate=0.04,
-    subsample=0.9,
-    colsample_bytree=0.9,
+    min_child_weight=30,
+    subsample=0.75,
+    colsample_bytree=0.75,
+    reg_alpha=1.0,
+    reg_lambda=30.0,
+    gamma=1.0,
     objective="reg:squarederror",
     random_state=42,
+    n_jobs=2,
 )
 xgb_model = MultiOutputRegressor(xgb_base)
 xgb_model.fit(X_train_scaled, y_train)
