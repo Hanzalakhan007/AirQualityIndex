@@ -64,7 +64,7 @@ src/                    Core data science code
 ## Model Summary
 
 - Production model: Ridge Regression
-- Production RMSE: 29.63 AQI points
+- Production RMSE: 29.13 AQI points
 - Fit status: OK
 - Evaluation: chronological holdout split over the engineered historical dataset
 

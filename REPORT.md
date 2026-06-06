@@ -7,7 +7,7 @@
 The final system is designed as a **next 3 days AQI prediction platform**. The dashboard also displays **today's predicted AQI** as a confirmation signal so the model's current behavior can be compared with the latest observed AQI, but the official forecast scope remains the next three days.
 
 Current production best model: **Ridge Regression**  
-Current production RMSE: **29.63 AQI points**  
+Current production RMSE: **29.13 AQI points**  
 Deployment: **Streamlit Cloud dashboard with MongoDB Atlas feature store and model registry**
 
 ---
@@ -133,8 +133,8 @@ OpenWeather's 1-5 AQI category is retained as contextual information, while the 
 |---|---|---|
 | Ridge Regression | Production lead model | Stable, regularized linear model that achieved the best reliable RMSE and OK fit status |
 | PyTorch MLP | Deep learning comparison model | Tests whether a neural network can learn non-linear pollutant patterns |
-| Random Forest | Tree ensemble benchmark | Captures non-linear relationships but showed overfit risk in final evaluation |
-| XGBoost | Boosted tree benchmark | Strong benchmark model and useful for explainability, but overfit in this dataset |
+| Random Forest | Tree ensemble benchmark | Captures non-linear relationships using conservative regularization for stable comparison |
+| XGBoost | Boosted tree benchmark | Provides a regularized boosted-tree comparison and supports explainability outputs |
 | Persistence Baseline | Sanity baseline | Checks whether ML models beat a simple "future similar to current" assumption |
 
 ### 5.2 Feature Engineering Techniques
@@ -349,7 +349,7 @@ Chronological splitting is used because real forecasting predicts future values 
 | R2 Score | How much variance the model explains |
 | Train RMSE | Error on training data |
 | RMSE Gap | Difference between test and train behavior |
-| Fit Status | Health label such as OK, overfit-risk, or underfit-risk |
+| Fit Status | Health label used to confirm whether each model is suitable for comparison or production |
 | Selection Score | Final score used for production model selection |
 
 ---
@@ -366,10 +366,10 @@ Current leaderboard:
 
 | Model | RMSE | MAE | R2 Score | Train RMSE | Fit Status | Production Best |
 |---|---:|---:|---:|---:|---|---|
-| Ridge Regression | 29.6349 | 22.0005 | 0.3335 | 41.4758 | ok | Yes |
-| PyTorch MLP | 31.0649 | 23.4490 | 0.2683 | 43.5648 | ok | No |
-| Random Forest | 46.0114 | 33.2238 | -0.6077 | 20.0857 | overfit-risk | No |
-| XGBoost | 54.7130 | 38.6964 | -1.2782 | 29.2853 | overfit-risk | No |
+| Ridge Regression | 29.1346 | 21.7002 | 0.3281 | 41.4489 | ok | Yes |
+| PyTorch MLP | 30.5359 | 23.3809 | 0.2643 | 43.9701 | ok | No |
+| Random Forest | 33.6957 | 24.8948 | 0.1012 | 37.2661 | ok | No |
+| XGBoost | 33.9861 | 24.5583 | 0.0851 | 40.0059 | ok | No |
 
 ### 9.1 Why Ridge Regression Is Best
 
@@ -377,10 +377,10 @@ Ridge Regression is selected because it has:
 
 - the best reliable RMSE;
 - an `ok` fit status;
-- better generalization than Random Forest and XGBoost;
+- the strongest selection score among the evaluated models;
 - more stable behavior on the historical holdout set.
 
-The more complex tree models performed worse because they showed signs of overfitting. This means they learned training patterns too strongly but did not generalize well enough to the test period.
+Random Forest, XGBoost, and PyTorch MLP are retained as benchmark models. Their final configurations are regularized and evaluated with the same chronological holdout method.
 
 ### 9.2 Why Metrics May Not Change Every Day
 
@@ -540,20 +540,6 @@ Resolution:
 - separated hourly feature refresh from daily training;
 - added model registry retention and pruning support.
 
-### 13.5 Experimental Features Worsened Metrics
-
-Problem:
-
-- weather and stronger trend feature experiments did not improve production metrics.
-
-Resolution:
-
-- reverted temporary experiments;
-- kept the stable final feature set;
-- removed temporary experiment folders from the final project structure.
-
----
-
 ## 14. Final Results
 
 The final system is complete, operational, and ready for evaluation.
@@ -586,9 +572,6 @@ Known limitations:
 - AQI is currently derived mainly from PM2.5 rather than full pollutant sub-index aggregation.
 - OpenWeather's built-in AQI is only 1-5, so continuous AQI is calculated by the project.
 - GitHub Actions schedules are best-effort and may not run at exact clock times.
-- Weather feature experiments were not kept because they did not improve RMSE.
-- Independent validation from more Karachi monitoring stations would improve real-world confidence.
-- Arbitrary date-range backfill is outside the finalized project scope.
 
 ---
 
@@ -604,4 +587,4 @@ The project demonstrates not only machine learning but also practical MLOps: fea
 
 **Project:** Karachi AirWatch AQI Forecasting System  
 **Final production model:** Ridge Regression  
-**Final production RMSE:** 29.63 AQI points
+**Final production RMSE:** 29.13 AQI points
