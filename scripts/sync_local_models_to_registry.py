@@ -96,15 +96,26 @@ def upload_artifact(
 
 def main() -> None:
     metrics_by_label = read_local_metrics()
+    missing_items: list[str] = []
+    for label, (_, filename, _) in MODEL_REGISTRY_NAMES.items():
+        model_path = MODELS_DIR / filename
+        if not model_path.exists():
+            missing_items.append(f"Missing local model artifact for {label}: {model_path}")
+        if label not in metrics_by_label:
+            missing_items.append(f"Missing metrics row for {label} in {LOCAL_METRICS_FILE}")
+
+    scaler_path = MODELS_DIR / SCALER_REGISTRY_FILENAME
+    if not scaler_path.exists():
+        missing_items.append(f"Missing local scaler artifact: {scaler_path}")
+
+    if missing_items:
+        raise SystemExit("Model registry sync preflight failed:\n" + "\n".join(missing_items))
+
     client = create_verified_mongo_client()
     try:
         database = client[MONGO_DB_NAME]
         for label, (registry_name, filename, model_kind) in MODEL_REGISTRY_NAMES.items():
             model_path = MODELS_DIR / filename
-            if not model_path.exists():
-                raise SystemExit(f"Missing local model artifact for {label}: {model_path}")
-            if label not in metrics_by_label:
-                raise SystemExit(f"Missing metrics row for {label} in {LOCAL_METRICS_FILE}")
             upload_artifact(
                 database=database,
                 registry_name=registry_name,
@@ -116,9 +127,6 @@ def main() -> None:
             )
             print(f"Uploaded {label} as latest registry version.")
 
-        scaler_path = MODELS_DIR / SCALER_REGISTRY_FILENAME
-        if not scaler_path.exists():
-            raise SystemExit(f"Missing local scaler artifact: {scaler_path}")
         upload_artifact(
             database=database,
             registry_name=SCALER_REGISTRY_NAME,

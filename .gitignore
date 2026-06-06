@@ -15,6 +15,7 @@ models/*
 !models/rf_model.pkl
 !models/scaler.pkl
 !models/xgb_model.pkl
+!models/pytorch_model.pth
 reports/*.png
 reports/*.csv
 reports/explainability/*.png
